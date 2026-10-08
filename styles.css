@@ -210,3 +210,6 @@ table.ex tr.xd td{background:var(--track);padding:12px 14px}
 .xr1 span:last-child{text-align:right}.xr1.i span:last-child{text-align:left}
 .exfoot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
 @media (max-width:40rem){.xr1,.xr1.i{grid-template-columns:3rem 1fr 4rem}.xr1 .chips,.xr1.i span:nth-child(4){grid-column:1/-1}.tabs2.four button{font-size:.8125rem}}
+.blk.off{opacity:.55}
+.dispnote{background:var(--bg);border:1px dashed var(--line2);border-radius:12px;padding:12px;color:var(--muted);font-size:.9375rem}
+[hidden]{display:none!important}

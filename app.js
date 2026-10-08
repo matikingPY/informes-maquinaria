@@ -322,7 +322,7 @@ function allowed() {
 }
 function newForm(mid) {
   var m = S.machines[mid], primera = !(m.horo > 0);
-  S.form = { machineId: mid, date: today(), hIni: primera ? '' : String(m.horo).replace('.', ','), unlock: primera, first: primera, hFin: '', works: [], pick: {}, prog: {}, hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '', nov: { t: '', sub: '', stop: '' } };
+  S.form = { machineId: mid, date: today(), hIni: primera ? '' : String(m.horo).replace('.', ','), unlock: primera, first: primera, hFin: '', works: [], pick: {}, prog: {}, hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '', disp: false, nov: { t: '', sub: '', stop: '' } };
   go('form');
 }
 function formHTML() {
@@ -333,26 +333,40 @@ function formHTML() {
   h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:2rem">' + esc(m.code) + '</b><span class="muted">' + esc(m.name) + (F.machineId !== own ? ' · autorizada' : '') + '</span></div>';
   h += '<label class="fld">Fecha<input class="txt" type="date" id="f-date" data-in="date" value="' + esc(F.date) + '" max="' + today() + '"></label></section>';
   h += '<section class="blk"><h3><span>2</span>Horómetro</h3>';
+  h += '<p class="muted small" style="margin:0">¿Cómo estuvo la máquina hoy?</p><div class="grid2"><button class="tg c" data-act="disp" data-v="0" aria-pressed="' + (!F.disp) + '">Trabajó</button><button class="tg c" data-act="disp" data-v="1" aria-pressed="' + (!!F.disp) + '">A disposición</button></div>';
+  if (F.disp) {
+    h += '<div class="itpick"><div class="small"><b>¿Por qué quedó a disposición?</b></div><div class="tgl">' + DISPS.map(function (x) { return '<button class="tg" data-act="dreason" data-v="' + x[0] + '" aria-pressed="' + (F.nov.t === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
+    if (F.nov.t === 'averia') h += '<div class="itpick"><div class="small"><b>¿Qué falló?</b></div><div class="tgl">' + AVS.map(function (x) { return '<button class="tg" data-act="novsub" data-v="' + x[0] + '" aria-pressed="' + (F.nov.sub === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
+    h += '<label class="fld">Horómetro (queda igual)<input class="num" id="f-hini" data-in="hIni" inputmode="decimal" autocomplete="off" value="' + esc(F.hIni) + '"' + (F.unlock ? '' : ' readonly') + '></label>';
+    if (F.first) h += '<p class="muted small" style="margin:0">Es el primer informe de esta máquina. Escribí el número que marca el horómetro ahora.</p>';
+    if (!F.unlock) h += '<button class="link" data-act="unlock" style="align-self:flex-start">El horómetro no marca ese número</button>';
+    h += '<div class="hbox" id="hbox"><span>Horas trabajadas</span><span class="mono" id="hval">0 h</span></div><div class="small muted" id="hmsg" style="min-height:1.2em">Día a disposición: no se pide el horómetro final ni los trabajos.</div></section>';
+    h += '<section class="blk off"><h3><span>3</span>Trabajos realizados' + (m.inf ? '<em class="inf">Informe ' + esc(m.inf) + '</em>' : '') + '</h3><div class="dispnote">No corresponde: la máquina quedó a disposición.</div></section>';
+  } else {
   h += '<label class="fld">Inicial' + (F.unlock ? '' : ' <span class="muted" style="font-weight:400">(el último que se registró)</span>') + '<input class="num" id="f-hini" data-in="hIni" inputmode="decimal" autocomplete="off" value="' + esc(F.hIni) + '"' + (F.unlock ? '' : ' readonly') + '></label>';
   if (F.first) h += '<p class="muted small" style="margin:0">Es el primer informe de esta máquina. Escribí el número que marca el horómetro ahora, antes de empezar.</p>';
   if (!F.unlock) h += '<button class="link" data-act="unlock" style="align-self:flex-start">El horómetro no marca ese número</button>';
   h += '<label class="fld">Final<input class="num" id="f-hfin" data-in="hFin" inputmode="decimal" autocomplete="off" placeholder="0000,0" value="' + esc(F.hFin) + '"></label>';
   h += '<div class="hbox" id="hbox"><span>Horas trabajadas</span><span class="mono" id="hval">—</span></div><div class="small" id="hmsg" style="min-height:1.2em"></div></section>';
   h += '<section class="blk"><h3><span>3</span>Trabajos realizados' + (m.inf ? '<em class="inf">Informe ' + esc(m.inf) + '</em>' : '') + '</h3><div id="wblk" class="stack tight">' + worksHTML() + '</div></section>';
+  }
   h += '<section class="blk"><h3><span>4</span>Combustible</h3><p class="muted small" style="margin:0">¿Cargaste combustible?</p><div class="grid2"><button class="tg c" data-act="fuel" data-v="no" aria-pressed="' + (F.fuel === false) + '">No</button><button class="tg c" data-act="fuel" data-v="si" aria-pressed="' + (F.fuel === true) + '">Sí</button></div>';
-  h += '<div id="fuelf" class="stack tight"' + (F.fuel === true ? '' : ' hidden') + '><div class="grid2"><button class="tg c" data-act="ftype" data-v="Gasoil" aria-pressed="' + (F.ftype === 'Gasoil') + '">Gasoil</button><button class="tg c" data-act="ftype" data-v="Nafta" aria-pressed="' + (F.ftype === 'Nafta') + '">Nafta</button></div><label class="fld">Litros cargados<input class="num" id="f-lit" data-in="liters" inputmode="decimal" autocomplete="off" value="' + esc(F.liters) + '"></label><label class="fld">Horómetro al cargar<input class="num" id="f-fh" data-in="fhoro" inputmode="decimal" autocomplete="off" value="' + esc(F.fhoro) + '"></label></div></section>';
-  h += '<section class="blk"><h3><span>5</span>Novedades</h3><div id="novblk" class="stack tight">' + novHTML() + '</div></section>';
+  h += '<div id="fuelf" class="stack tight"' + (F.fuel === true ? '' : ' hidden') + '><div class="grid2"><button class="tg c" data-act="ftype" data-v="Gasoil" aria-pressed="' + (F.ftype === 'Gasoil') + '">Gasoil</button><button class="tg c" data-act="ftype" data-v="Nafta" aria-pressed="' + (F.ftype === 'Nafta') + '">Nafta</button></div><label class="fld">Litros cargados<input class="num" id="f-lit" data-in="liters" inputmode="decimal" autocomplete="off" value="' + esc(F.liters) + '"></label>' + (F.disp ? '<p class="muted small" style="margin:0">El horómetro al cargar es el mismo del día (queda igual).</p>' : '<label class="fld">Horómetro al cargar<input class="num" id="f-fh" data-in="fhoro" inputmode="decimal" autocomplete="off" value="' + esc(F.fhoro) + '"></label>') + '</div></section>';
+  if (F.disp) h += '<section class="blk"><h3><span>5</span>Detalle</h3><div class="stack tight"><label class="fld"><span class="muted" style="font-weight:400">Detalle para tu supervisor (opcional)</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(F.notes) + '</textarea></label></div></section>';
+  else h += '<section class="blk"><h3><span>5</span>Novedades</h3><div id="novblk" class="stack tight">' + novHTML() + '</div></section>';
   h += '<div id="errs"></div><button class="btn primary" id="send" data-act="send">Enviar informe</button></div>';
   return h;
 }
-var NOVS = [['', 'Sin novedad'], ['averia', 'Avería'], ['lluvia', 'Parada por lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
-var NOV_N = { averia: 'Avería', lluvia: 'Parada por lluvia', material: 'Falta de material', otra: 'Otra novedad' };
-var AVS = [['motor', 'Motor'], ['hidraulico', 'Hidráulico'], ['neumaticos', 'Neumáticos'], ['electrico', 'Eléctrico'], ['otra', 'Otra']];
+var NOVS = [['', 'Sin novedad'], ['averia', 'Falla mecánica'], ['lluvia', 'Parada por lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
+var NOV_N = { averia: 'Falla mecánica', lluvia: 'Parada por lluvia', material: 'Falta de material', otra: 'Otra novedad' };
+var AVS = [['motor', 'Motor'], ['hidraulico', 'Hidráulico'], ['neumaticos', 'Neumáticos'], ['electrico', 'Eléctrico'], ['otra', 'Otra falla']];
+var DISPS = [['lluvia', 'Lluvia'], ['averia', 'Falla mecánica'], ['frente', 'Sin frente de trabajo'], ['otra', 'Otros']];
+var DISP_N = {}; DISPS.forEach(function (x) { DISP_N[x[0]] = x[1]; });
 var AV_N = {}; AVS.forEach(function (a) { AV_N[a[0]] = a[1]; });
-function novText(n) { if (!n || !n.t) return ''; return (NOV_N[n.t] || n.t) + (n.t === 'averia' && n.sub ? ' · ' + (AV_N[n.sub] || n.sub) : '') + (n.stop > 0 ? ' · ' + fmt(n.stop) + ' h parada' : ''); }
+function novText(n) { if (!n || !n.t) return ''; if (n.disp) return 'A disposición · ' + (DISP_N[n.t] || n.t) + (n.t === 'averia' && n.sub ? ' · ' + (AV_N[n.sub] || n.sub) : ''); return (NOV_N[n.t] || n.t) + (n.t === 'averia' && n.sub ? ' · ' + (AV_N[n.sub] || n.sub) : '') + (n.stop > 0 ? ' · ' + fmt(n.stop) + ' h parada' : ''); }
 function novHTML() {
   var N = S.form.nov, h = '<p class="muted small" style="margin:0">¿Pasó algo que haya frenado la máquina?</p><div class="tgl">' + NOVS.map(function (x) { return '<button class="tg" data-act="nov" data-v="' + x[0] + '" aria-pressed="' + (N.t === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
-  if (N.t === 'averia') h += '<div class="itpick"><div class="small"><b>¿Qué se averió?</b></div><div class="tgl">' + AVS.map(function (x) { return '<button class="tg" data-act="novsub" data-v="' + x[0] + '" aria-pressed="' + (N.sub === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
+  if (N.t === 'averia') h += '<div class="itpick"><div class="small"><b>¿Qué falló?</b></div><div class="tgl">' + AVS.map(function (x) { return '<button class="tg" data-act="novsub" data-v="' + x[0] + '" aria-pressed="' + (N.sub === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
   if (N.t) h += '<label class="fld">Horas que estuvo parada<input class="num" data-in="nstop" inputmode="decimal" autocomplete="off" placeholder="0,0" value="' + esc(N.stop) + '"></label><p class="muted small" style="margin:0">Estas horas no se restan del horómetro: sirven para saber cuánto tiempo estuvo parada la máquina. Si estuvo parada todo el día, dejá el horómetro final igual al inicial.</p>';
   h += '<label class="fld"><span class="muted" style="font-weight:400">' + (N.t === 'otra' ? 'Contanos qué pasó' : 'Detalle para tu supervisor (opcional)') + '</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(S.form.notes) + '</textarea></label>';
   return h;
@@ -415,6 +429,7 @@ function split() {
 }
 function liveUpdate() {
   var F = S.form, t = totalHours(), box = document.getElementById('hbox'), val = document.getElementById('hval'), msg = document.getElementById('hmsg'); if (!box) return;
+  if (F.disp) { val.textContent = '0 h'; box.className = 'hbox'; return; }
   if (isFinite(t) && t > 0 && t <= 24) { val.textContent = fmt(t) + ' h'; box.className = 'hbox'; msg.textContent = t > 14 ? 'Son muchas horas. Revisá el número final.' : ''; msg.style.color = 'var(--warn)'; }
   else if (t === 0 && sinTrabajo()) { val.textContent = '0 h'; box.className = 'hbox'; msg.textContent = 'Día sin trabajar: se guarda con la novedad.'; msg.style.color = 'var(--muted)'; }
   else if (isFinite(t)) { val.textContent = '—'; box.className = 'hbox bad'; msg.textContent = t <= 0 ? 'El horómetro final tiene que ser mayor que el inicial.' : 'Son más de 24 horas. Revisá el horómetro final.'; msg.style.color = 'var(--crit)'; }
@@ -436,8 +451,9 @@ function buildReport() {
   var F = S.form, m = S.machines[F.machineId], errs = [], flags = [];
   var hIni = parseNum(F.hIni), hFin = parseNum(F.hFin), hours = 0, t = today();
   if (!isFinite(hIni)) errs.push('Falta el horómetro inicial.');
+  if (F.disp) hFin = hIni;
   if (!isFinite(hFin)) errs.push('Falta el horómetro final.');
-  var dia0 = isFinite(hIni) && isFinite(hFin) && hFin === hIni && sinTrabajo();
+  var dia0 = F.disp ? isFinite(hIni) : (isFinite(hIni) && isFinite(hFin) && hFin === hIni && sinTrabajo());
   if (isFinite(hIni) && isFinite(hFin)) {
     hours = r1(hFin - hIni);
     if (dia0) hours = 0;
@@ -464,26 +480,31 @@ function buildReport() {
     else if (lines[k]) { lines[k].pi = a.txt; lines[k].pf = b.txt; }
   });
   var nov = null, N = F.nov;
-  if (N.t) {
+  if (F.disp) {
+    if (!N.t) errs.push('Elegí por qué quedó a disposición.');
+    else if (N.t === 'averia' && !N.sub) errs.push('Elegí qué falló.');
+    else nov = { t: N.t, sub: N.t === 'averia' ? N.sub : '', stop: 0, disp: true };
+    if (N.t === 'averia') flags.push('Falla mecánica' + (N.sub ? ' (' + (AV_N[N.sub] || N.sub) + ')' : ''));
+  } else if (N.t) {
     var np = parseNum(N.stop);
-    if (N.t === 'averia' && !N.sub) errs.push('Elegí qué se averió.');
+    if (N.t === 'averia' && !N.sub) errs.push('Elegí qué falló.');
     if (!isFinite(np) || np <= 0) errs.push('Escribí cuántas horas estuvo parada la máquina.');
     else if (np > 24) errs.push('Las horas de parada no pueden ser más de 24.');
     if (N.t === 'otra' && !F.notes.trim()) errs.push('Contanos qué pasó en «Otra».');
     if (isFinite(np) && np > 0 && np <= 24) nov = { t: N.t, sub: N.t === 'averia' ? N.sub : '', stop: r1(np) };
-    if (N.t === 'averia') flags.push('Avería' + (N.sub ? ' (' + (AV_N[N.sub] || N.sub) + ')' : ''));
+    if (N.t === 'averia') flags.push('Falla mecánica' + (N.sub ? ' (' + (AV_N[N.sub] || N.sub) + ')' : ''));
   }
   var fuel = null;
   if (F.fuel === null) errs.push('Contestá si cargaste combustible.');
   else if (F.fuel) {
-    var L = parseNum(F.liters), fh = parseNum(F.fhoro);
+    var L = parseNum(F.liters), fh = F.disp ? hIni : parseNum(F.fhoro);
     if (!(L > 0)) errs.push('Falta cuántos litros cargaste.'); else if (L > 600) flags.push('Carga de más de 600 litros');
     if (!isFinite(fh)) errs.push('Falta el horómetro al cargar combustible.');
     else if (isFinite(hIni) && isFinite(hFin) && (fh < hIni || fh > hFin)) errs.push('El horómetro de la carga tiene que estar entre ' + fmt(hIni) + ' y ' + fmt(hFin) + '.');
     if (L > 0 && isFinite(fh)) fuel = { type: F.ftype, liters: L, horo: fh };
   }
   if (F.unlock && !F.first && isFinite(hIni) && Math.abs(hIni - m.horo) > 0.05) flags.push('Horómetro inicial distinto al último registrado (' + fmt(m.horo) + ')');
-  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, lines: lines, fuel: fuel, nov: nov, notes: F.notes.trim(), flags: flags, createdAt: new Date().toISOString() }, hours: hours };
+  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, lines: lines, fuel: fuel, nov: nov, notes: F.notes.trim(), flags: flags, disp: !!F.disp, createdAt: new Date().toISOString() }, hours: hours };
 }
 function submitForm() {
   var b = buildReport(); if (b.errs.length) { showErrs(b.errs); return; }
@@ -677,7 +698,7 @@ function bars(rows, fmtv, max) {
   var mx = max || Math.max.apply(null, rows.map(function (r) { return r.v; }).concat([0.0001]));
   return rows.map(function (r) { return '<div class="brow"><span class="lb" title="' + esc(r.l) + '">' + esc(r.l) + '</span><span class="track"><span class="fill" style="width:' + Math.max(r.v / mx * 100, r.v > 0 ? 1.5 : 0) + '%"></span></span><span class="vl">' + fmtv(r.v) + '</span></div>'; }).join('') || '<p class="muted small">Sin datos en este período.</p>';
 }
-var EX_MODES = [['maq', 'Por máquina'], ['item', 'Por ítem'], ['op', 'Por operador'], ['av', 'Averías']];
+var EX_MODES = [['maq', 'Por máquina'], ['item', 'Por ítem'], ['op', 'Por operador'], ['av', 'Novedades']];
 function supView() {
   var tabs = [['panel', 'Panel'], ['explorar', 'Explorar'], ['informes', 'Informes'], ['solicitudes', 'Solicitudes']];
   var rev = S.sup.reports.filter(function (r) { return r.status === 'validar'; }).length, pend = S.sup.requests.filter(function (r) { return r.status === 'pendiente'; }).length;
@@ -718,7 +739,7 @@ function panelView() {
   var rev = S.sup.reports.filter(function (r) { return r.status === 'validar'; }).length, pend = S.sup.requests.filter(function (r) { return r.status === 'pendiente'; }).length;
   var desde7 = addDays(t, -6), av7 = S.sup.reports.filter(function (r) { return r.nov && r.nov.t === 'averia' && r.date >= desde7; }).length;
   function rv(n, txt, act, lbl, d) { return '<div class="rv' + (n ? '' : ' zero') + '"><span class="pill ' + (n ? (act === 'goav' ? 'crit' : 'warn') : '') + '">' + n + '</span><span>' + txt + '</span>' + (n ? '<button class="link" data-act="' + act + '"' + (d || '') + '>' + lbl + '</button>' : '') + '</div>'; }
-  var rvh = rv(rev, 'informes marcados a revisar', 'tab" data-t="informes', 'Ver') + rv(pend, 'solicitudes de máquina pendientes', 'tab" data-t="solicitudes', 'Ver') + rv(av7, 'averías en los últimos 7 días', 'goav', 'Ver') + (hoyOk ? rv(sin.length, 'máquinas sin informe hoy', 'miss', S.showMiss ? 'Ocultar' : 'Ver cuáles') : '');
+  var rvh = rv(rev, 'informes marcados a revisar', 'tab" data-t="informes', 'Ver') + rv(pend, 'solicitudes de máquina pendientes', 'tab" data-t="solicitudes', 'Ver') + rv(av7, 'fallas mecánicas en los últimos 7 días', 'goav', 'Ver') + (hoyOk ? rv(sin.length, 'máquinas sin informe hoy', 'miss', S.showMiss ? 'Ocultar' : 'Ver cuáles') : '');
   if (S.showMiss && hoyOk) rvh += '<div class="chips" style="margin-top:4px">' + sin.map(function (m) { var o = opsOfMachine(m.id)[0]; return '<span class="pill" title="' + esc(o ? o.name : '') + '">' + esc(m.code) + (o ? ' · ' + esc(o.name.split(' ')[0]) : '') + '</span>'; }).join('') + '</div>';
   var cardRev = '<section class="panel alert"><h2>Para revisar</h2><div class="sub">Lo que necesita tu atención ahora</div>' + rvh + '</section>';
   // horas por día
@@ -746,7 +767,7 @@ function panelView() {
 /* ---- Explorar: filtrar y buscar lo que uno busca ---- */
 var EX_INF = [['all', 'Todos'], ['A', 'A · Asfalto'], ['B', 'B · Conformación'], ['C', 'C · Mov. de suelos'], ['D', 'D · Transporte']];
 function exTipos() {
-  if (S.ex.mode === 'av') return [['all', 'Todas'], ['averia', 'Avería'], ['lluvia', 'Lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
+  if (S.ex.mode === 'av') return [['all', 'Todas'], ['disp', 'A disposición'], ['averia', 'Falla mecánica'], ['lluvia', 'Lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
   var seen = {}, out = [['all', 'Todos']]; S.sup.machines.forEach(function (m) { if (m.name && !seen[m.name]) { seen[m.name] = 1; out.push([m.name, m.name]); } });
   return out;
 }
@@ -821,7 +842,7 @@ function exBuild() {
       { k: 'stop', l: 'H parada', n: 1, t: function (r) { return r.nov.stop || 0; }, f: function (v) { return v ? fmt(v) : '—'; }, b: 1 },
       { k: 'notes', l: 'Detalle', t: function (r) { return r.notes || ''; }, h: function (r) { return '<span class="small">' + esc(r.notes || '') + '</span>'; } }
     ];
-    rows = reps.filter(function (r) { return r.nov && (e.tipo === 'all' || r.nov.t === e.tipo) && (!q || (r.machineCode + ' ' + r.operatorName + ' ' + (r.notes || '')).toLowerCase().indexOf(q) > -1); }).map(function (r) { return Object.assign({ key: r.id }, r); });
+    rows = reps.filter(function (r) { return r.nov && (e.tipo === 'all' || (e.tipo === 'disp' ? !!r.nov.disp : r.nov.t === e.tipo)) && (!q || (r.machineCode + ' ' + r.operatorName + ' ' + (r.notes || '')).toLowerCase().indexOf(q) > -1); }).map(function (r) { return Object.assign({ key: r.id }, r); });
   }
   return { cols: cols, rows: rows };
 }
@@ -917,7 +938,9 @@ var act = {
   hmore: function () { S.hist.shown += 20; render(); },
   share: function (d) { shareReport(d.id); },
   nov: function (d) { var N = S.form.nov; N.t = d.v; if (d.v !== 'averia') N.sub = ''; if (!d.v) N.stop = ''; var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); liveUpdate(); },
-  novsub: function (d) { S.form.nov.sub = d.v; var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); },
+  disp: function (d) { var F = S.form; F.disp = d.v === '1'; F.nov = { t: '', sub: '', stop: '' }; if (F.disp) { F.works = []; F.pick = {}; F.prog = {}; F.hrs = {}; F.hrsEdited = false; F.hFin = ''; } render(); },
+  dreason: function (d) { var N = S.form.nov; N.t = d.v; if (d.v !== 'averia') N.sub = ''; N.stop = ''; render(); },
+  novsub: function (d) { S.form.nov.sub = d.v; if (S.form.disp) { render(); return; } var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); },
   syncnow: function () { toast('Enviando…'); syncNow(); },
   discard: function (d) { S.failed = S.failed.filter(function (f) { return f.r.id !== d.id; }); save(); render(); },
   otra: function () { S.reqPick = null; S.reqNote = ''; go('otra'); },
@@ -999,5 +1022,5 @@ if (CFG.API_URL && CFG.API_KEY) {
   bp.then(function () { if (S.session && S.session.role === 'op') syncNow(); });
 } else hideSplash();
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
+if (window.__IED_TEST__) window.__IED_TEST__.hooks = { novText: novText, S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
 })();
