@@ -61,6 +61,8 @@ function mKind(m) {
   if (/motonivel|\bmn-/.test(t)) return 'mn'; if (/exc|\bex-/.test(t)) return 'ex'; if (/top|\btp-/.test(t)) return 'tp';
   if (/tractor|\bta-/.test(t)) return 'ta'; if (/vibro|compact|\bvc-/.test(t)) return 'vc'; return 'gen';
 }
+var DARKM = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+if (DARKM && DARKM.addEventListener) DARKM.addEventListener('change', function () { if (typeof render === 'function') render(); });
 var ICON = {
   ex: '<rect x="6" y="46" width="60" height="13" rx="6.5" fill="B"/><circle cx="14" cy="52.5" r="3.2" fill="H"/><circle cx="37" cy="52.5" r="3.2" fill="H"/><circle cx="58" cy="52.5" r="3.2" fill="H"/><rect x="14" y="31" width="42" height="14" rx="3" fill="B"/><path d="M18 31V19a2 2 0 0 1 2-2h14l8 14z" fill="A"/><path d="M23 29V21h9l5 8z" fill="H" opacity=".5"/><path d="M46 35L66 11l8 5" stroke="B" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 14l10 22" stroke="B" stroke-width="4" stroke-linecap="round"/><path d="M77 34h13l-3 13h-10z" fill="A"/>',
   tp: '<rect x="10" y="45" width="66" height="14" rx="7" fill="B"/><circle cx="19" cy="52" r="3.4" fill="H"/><circle cx="43" cy="52" r="3.4" fill="H"/><circle cx="67" cy="52" r="3.4" fill="H"/><rect x="22" y="31" width="46" height="14" rx="3" fill="B"/><path d="M30 31V16a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v15z" fill="A"/><path d="M34 28V19h12v9z" fill="H" opacity=".5"/><rect x="14" y="10" width="3" height="8" fill="B"/><path d="M68 44l16 4" stroke="B" stroke-width="4" stroke-linecap="round"/><path d="M84 28h6l2 28h-6z" fill="A"/>',
@@ -70,7 +72,7 @@ var ICON = {
   gen: '<circle cx="48" cy="34" r="22" fill="A"/><circle cx="48" cy="34" r="14" fill="B"/><circle cx="48" cy="34" r="5" fill="H"/>'
 };
 function mIcon(m, dark, w) {
-  var body = dark ? '#ffffff' : '#0e0e0e', hole = dark ? '#0e0e0e' : '#ffffff', g = ICON[mKind(m)].replace(/"B"/g, '"' + body + '"').replace(/"H"/g, '"' + hole + '"').replace(/"A"/g, '"#d31f16"');
+  var osc = DARKM && DARKM.matches, body = dark ? '#ffffff' : (osc ? '#f2f2f2' : '#0e0e0e'), hole = dark ? (osc ? '#2c2c2c' : '#0e0e0e') : (osc ? '#1e1e1e' : '#ffffff'), g = ICON[mKind(m)].replace(/"B"/g, '"' + body + '"').replace(/"H"/g, '"' + hole + '"').replace(/"A"/g, '"#d31f16"');
   return '<svg class="micon" width="' + w + '" height="' + Math.round(w * 2 / 3) + '" viewBox="0 0 96 64" aria-hidden="true">' + g + '</svg>';
 }
 var ERR = {
@@ -152,7 +154,7 @@ function header() {
   var who = '';
   if (S.session && S.session.role === 'op') { var o = S.operators[S.session.opId]; who = '<div class="who">' + netPill() + '<b>' + esc(o ? o.name : '') + '</b><button class="link" data-act="logout">Salir</button></div>'; }
   if (S.session && S.session.role === 'sup') who = '<div class="who"><b>Supervisor</b><button class="link" data-act="logout">Salir</button></div>';
-  return '<div class="topin"><img class="logo" src="icons/logo.png" alt="WheelCo">' + who + '</div>';
+  return '<div class="topin"><picture><source media="(prefers-color-scheme: dark)" srcset="icons/logo-dark.png"><img class="logo" src="icons/logo.png" alt="WheelCo"></picture>' + who + '</div>';
 }
 function render() {
   app.className = 'wrap' + (S.view === 'sup' ? ' wide' : ''); topEl.className = S.view === 'sup' ? 'wide' : '';

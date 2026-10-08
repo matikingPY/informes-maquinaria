@@ -1,7 +1,7 @@
 // Guarda la app en el celular para que abra sin señal.
 // Si cambiás cualquier archivo de la app, subí también el número de VERSION para que los celulares se actualicen.
-var VERSION = 'ied-v4';
-var ARCHIVOS = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo.png'];
+var VERSION = 'ied-v5';
+var ARCHIVOS = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo.png', './icons/logo-dark.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(VERSION).then(function (c) { return c.addAll(ARCHIVOS); }).then(function () { return self.skipWaiting(); }));
