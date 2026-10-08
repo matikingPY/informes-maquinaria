@@ -82,9 +82,15 @@ var ERR = {
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
 
 /* ---------- servidor ---------- */
+var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1 }; // se pueden repetir sin riesgo
 function api(action, payload) {
+  var p = api1(action, payload);
+  if (!SEGURAS[action]) return p;
+  return p.catch(function (e) { if (e && e.offline) return api1(action, payload); throw e; }); // si falla la conexión, reintenta una vez
+}
+function api1(action, payload) {
   if (!CFG.API_URL || !CFG.API_KEY) return Promise.reject({ offline: false, error: 'not_configured' });
-  var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 25000);
+  var ctl = new AbortController(), t = setTimeout(function () { ctl.abort(); }, 40000);
   return fetch(CFG.API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ key: CFG.API_KEY, action: action }, payload || {})), signal: ctl.signal, redirect: 'follow' })
     .then(function (r) { clearTimeout(t); return r.json().catch(function () { throw { offline: true, error: 'bad_response' }; }); },
       function () { clearTimeout(t); throw { offline: true, error: 'network' }; })
@@ -227,7 +233,7 @@ function docDone() {
     if (e && e.offline) {
       var id = S.known[doc];
       if (id && S.operators[id]) { L.opId = id; L.step = 'pin'; L.pin = ''; L.first = null; render(); return; }
-      L.err = 'Necesitás señal para entrar la primera vez en este celular.';
+      L.err = 'No pudimos conectar. Revisá tu señal y tocá Continuar otra vez.';
     } else L.err = errMsg(e);
     render();
   });

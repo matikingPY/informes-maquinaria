@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que abra sin señal.
 // Si cambiás cualquier archivo de la app, subí también el número de VERSION para que los celulares se actualicen.
-var VERSION = 'ied-v2';
+var VERSION = 'ied-v3';
 var ARCHIVOS = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/logo.png'];
 
 self.addEventListener('install', function (e) {

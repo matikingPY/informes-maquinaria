@@ -5,7 +5,7 @@
   --accent:#d31f16; --accent-ink:#ffffff; --accent-soft:#fbe4e2; --accent-text:#c81d14; --accent-on-dark:#ff6a60;
   --good:#11663a; --good-bg:#ddf3e6; --warn:#7a4a00; --warn-bg:#fcebc9; --crit:#9c1c14; --crit-bg:#fbe0dd;
   --f-display:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif; --f-body:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif; --f-mono:ui-monospace,'Roboto Mono',Menlo,Consolas,monospace;
-  color-scheme:light;
+  color-scheme:only light;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 var(--f-body);padding-block:0 56px;min-height:100%}
