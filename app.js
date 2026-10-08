@@ -18,7 +18,7 @@ var S = {
   machines: saved.machines || {}, catalog: saved.catalog || { works: [], items: {} }, operators: localOps, known: knownDocs, shift: saved.shift || 9, myReqs: saved.myReqs || [], myReqsDate: saved.myReqsDate || '',
   queue: saved.queue || [], failed: saved.failed || [], session: null, pendingSession: null, view: 'login', tab: 'panel',
   login: newLogin('op'), form: null, last: null, f: null, sup: null, supLoading: false,
-  reqPick: null, reqNote: '', boot: 'wait', net: { syncing: false, lastErr: '' }
+  reqPick: null, reqNote: '', showMiss: false, ex: { mode: 'maq', q: '', inf: 'all', tipo: 'all', open: null, shown: 15, sort: { maq: ['hours', -1], item: ['h', -1], op: ['hours', -1], av: ['date', -1] } }, hist: { opId: (saved.hist && saved.hist.opId) || '', list: (saved.hist && saved.hist.list) || [], at: (saved.hist && saved.hist.at) || '', range: '30', shown: 20, open: null, loading: false, err: '' }, boot: 'wait', net: { syncing: false, lastErr: '' }
 };
 if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
   if (CFG.REQUIRE_PIN_ON_OPEN) { S.pendingSession = saved.session; S.login.opId = saved.session.opId; S.login.step = 'pin'; }
@@ -27,7 +27,7 @@ if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
 
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, catalog: S.catalog, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed }));
+    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, catalog: S.catalog, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed, hist: { opId: S.hist.opId, list: S.hist.list, at: S.hist.at } }));
   } catch (e) {}
 }
 
@@ -44,6 +44,13 @@ function today() { return new Date().toLocaleDateString('sv-SE'); }
 function addDays(s, n) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2] + n).toLocaleDateString('sv-SE'); }
 function dmy(s) { var p = s.split('-'); return p[2] + '/' + p[1]; }
 function dlong(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString('es-PY', { weekday: 'short', day: '2-digit', month: '2-digit' }); }
+function dfullY(s) { return dfull(s) + ' ' + s.slice(0, 4); }
+function comprobante(id) { var x = String(id || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8); return x.length > 4 ? x.slice(0, 4) + '-' + x.slice(4) : x; }
+function fmtRec(v) {
+  if (!v) return ''; var d = new Date(v); if (isNaN(d.getTime())) return String(v);
+  var f = d.toLocaleDateString('es-PY', { day: 'numeric', month: 'long' }), hh = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  return f + ', ' + hh;
+}
 function arr(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
 function machines() { return arr(S.machines).sort(function (a, b) { return (a.order || 0) - (b.order || 0); }); }
 function operators() { return arr(S.operators).sort(function (a, b) { return a.name.localeCompare(b.name, 'es'); }); }
@@ -80,12 +87,12 @@ var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
   bad_pin: 'PIN incorrecto', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
   unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
-  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
+  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
 };
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
 
 /* ---------- servidor ---------- */
-var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1 }; // se pueden repetir sin riesgo
+var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1, myReports: 1 }; // se pueden repetir sin riesgo
 function api(action, payload) {
   var p = api1(action, payload);
   if (!SEGURAS[action]) return p;
@@ -167,6 +174,7 @@ function render() {
   else if (S.view === 'form') body = formHTML();
   else if (S.view === 'otra') body = otraView();
   else if (S.view === 'done') body = doneView();
+  else if (S.view === 'hist') body = histView();
   else if (S.view === 'sup') body = supView();
   topEl.innerHTML = header(); app.innerHTML = body;
   if (S.view === 'form') liveUpdate();
@@ -286,7 +294,7 @@ function opHome() {
     if (r.status === 'aprobada') h += '<div class="card"><div class="eyebrow">Autorizada para hoy</div><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0 12px"><b class="mono" style="font-size:1.25rem">' + esc(r.machineCode) + '</b><span class="pill ok">Aprobada</span></div><button class="btn primary" data-act="newForm" data-m="' + esc(r.machineId) + '">Cargar informe con ' + esc(r.machineCode) + '</button></div>';
     else h += '<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Pediste <b class="mono">' + esc(r.machineCode) + '</b></span><span class="pill ' + (r.status === 'rechazada' ? 'crit' : 'warn') + '">' + (r.status === 'rechazada' ? 'Rechazada' : 'Esperando al supervisor') + '</span></div>';
   });
-  h += '<button class="btn" data-act="otra">Usé otra máquina</button>';
+  h += '<button class="btn" data-act="hist">Mis informes</button><button class="btn" data-act="otra">Usé otra máquina</button>';
   if (installEv) h += '<button class="link" data-act="install" style="align-self:center">Instalar la app en este celular</button>';
   return h + '</div>';
 }
@@ -314,7 +322,7 @@ function allowed() {
 }
 function newForm(mid) {
   var m = S.machines[mid], primera = !(m.horo > 0);
-  S.form = { machineId: mid, date: today(), hIni: primera ? '' : String(m.horo).replace('.', ','), unlock: primera, first: primera, hFin: '', works: [], pick: {}, prog: {}, hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '' };
+  S.form = { machineId: mid, date: today(), hIni: primera ? '' : String(m.horo).replace('.', ','), unlock: primera, first: primera, hFin: '', works: [], pick: {}, prog: {}, hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '', nov: { t: '', sub: '', stop: '' } };
   go('form');
 }
 function formHTML() {
@@ -333,8 +341,20 @@ function formHTML() {
   h += '<section class="blk"><h3><span>3</span>Trabajos realizados' + (m.inf ? '<em class="inf">Informe ' + esc(m.inf) + '</em>' : '') + '</h3><div id="wblk" class="stack tight">' + worksHTML() + '</div></section>';
   h += '<section class="blk"><h3><span>4</span>Combustible</h3><p class="muted small" style="margin:0">¿Cargaste combustible?</p><div class="grid2"><button class="tg c" data-act="fuel" data-v="no" aria-pressed="' + (F.fuel === false) + '">No</button><button class="tg c" data-act="fuel" data-v="si" aria-pressed="' + (F.fuel === true) + '">Sí</button></div>';
   h += '<div id="fuelf" class="stack tight"' + (F.fuel === true ? '' : ' hidden') + '><div class="grid2"><button class="tg c" data-act="ftype" data-v="Gasoil" aria-pressed="' + (F.ftype === 'Gasoil') + '">Gasoil</button><button class="tg c" data-act="ftype" data-v="Nafta" aria-pressed="' + (F.ftype === 'Nafta') + '">Nafta</button></div><label class="fld">Litros cargados<input class="num" id="f-lit" data-in="liters" inputmode="decimal" autocomplete="off" value="' + esc(F.liters) + '"></label><label class="fld">Horómetro al cargar<input class="num" id="f-fh" data-in="fhoro" inputmode="decimal" autocomplete="off" value="' + esc(F.fhoro) + '"></label></div></section>';
-  h += '<section class="blk"><h3><span>5</span>Observaciones</h3><label class="fld"><span class="muted" style="font-weight:400">Si hubo avería, parada o algo para avisar (opcional)</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(F.notes) + '</textarea></label></section>';
+  h += '<section class="blk"><h3><span>5</span>Novedades</h3><div id="novblk" class="stack tight">' + novHTML() + '</div></section>';
   h += '<div id="errs"></div><button class="btn primary" id="send" data-act="send">Enviar informe</button></div>';
+  return h;
+}
+var NOVS = [['', 'Sin novedad'], ['averia', 'Avería'], ['lluvia', 'Parada por lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
+var NOV_N = { averia: 'Avería', lluvia: 'Parada por lluvia', material: 'Falta de material', otra: 'Otra novedad' };
+var AVS = [['motor', 'Motor'], ['hidraulico', 'Hidráulico'], ['neumaticos', 'Neumáticos'], ['electrico', 'Eléctrico'], ['otra', 'Otra']];
+var AV_N = {}; AVS.forEach(function (a) { AV_N[a[0]] = a[1]; });
+function novText(n) { if (!n || !n.t) return ''; return (NOV_N[n.t] || n.t) + (n.t === 'averia' && n.sub ? ' · ' + (AV_N[n.sub] || n.sub) : '') + (n.stop > 0 ? ' · ' + fmt(n.stop) + ' h parada' : ''); }
+function novHTML() {
+  var N = S.form.nov, h = '<p class="muted small" style="margin:0">¿Pasó algo que haya frenado la máquina?</p><div class="tgl">' + NOVS.map(function (x) { return '<button class="tg" data-act="nov" data-v="' + x[0] + '" aria-pressed="' + (N.t === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (N.t === 'averia') h += '<div class="itpick"><div class="small"><b>¿Qué se averió?</b></div><div class="tgl">' + AVS.map(function (x) { return '<button class="tg" data-act="novsub" data-v="' + x[0] + '" aria-pressed="' + (N.sub === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
+  if (N.t) h += '<label class="fld">Horas que estuvo parada<input class="num" data-in="nstop" inputmode="decimal" autocomplete="off" placeholder="0,0" value="' + esc(N.stop) + '"></label><p class="muted small" style="margin:0">Estas horas no se restan del horómetro: sirven para saber cuánto tiempo estuvo parada la máquina. Si estuvo parada todo el día, dejá el horómetro final igual al inicial.</p>';
+  h += '<label class="fld"><span class="muted" style="font-weight:400">' + (N.t === 'otra' ? 'Contanos qué pasó' : 'Detalle para tu supervisor (opcional)') + '</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(S.form.notes) + '</textarea></label>';
   return h;
 }
 function totalHours() { var F = S.form, a = parseNum(F.hIni), b = parseNum(F.hFin); return isFinite(a) && isFinite(b) ? r1(b - a) : NaN; }
@@ -396,6 +416,7 @@ function split() {
 function liveUpdate() {
   var F = S.form, t = totalHours(), box = document.getElementById('hbox'), val = document.getElementById('hval'), msg = document.getElementById('hmsg'); if (!box) return;
   if (isFinite(t) && t > 0 && t <= 24) { val.textContent = fmt(t) + ' h'; box.className = 'hbox'; msg.textContent = t > 14 ? 'Son muchas horas. Revisá el número final.' : ''; msg.style.color = 'var(--warn)'; }
+  else if (t === 0 && sinTrabajo()) { val.textContent = '0 h'; box.className = 'hbox'; msg.textContent = 'Día sin trabajar: se guarda con la novedad.'; msg.style.color = 'var(--muted)'; }
   else if (isFinite(t)) { val.textContent = '—'; box.className = 'hbox bad'; msg.textContent = t <= 0 ? 'El horómetro final tiene que ser mayor que el inicial.' : 'Son más de 24 horas. Revisá el horómetro final.'; msg.style.color = 'var(--crit)'; }
   else { val.textContent = '—'; box.className = 'hbox'; msg.textContent = ''; }
   var ls = lineList();
@@ -405,6 +426,7 @@ function liveUpdate() {
     var el = document.getElementById('hsum'); if (el) { if (isFinite(t) && t > 0) { var ok = Math.abs(s - t) <= 0.05; el.textContent = 'Sumás ' + fmt(s) + ' de ' + fmt(t) + ' h' + (ok ? ' ✓' : ''); el.style.color = ok ? 'var(--good)' : 'var(--warn)'; } else el.textContent = ''; }
   }
 }
+function sinTrabajo() { var N = S.form.nov, p = parseNum(N.stop); return !!N.t && isFinite(p) && p > 0; }
 function showErrs(list) {
   var e = document.getElementById('errs'); if (!e) return;
   e.innerHTML = list.length ? '<div class="callout" role="alert">Revisá esto antes de enviar:<ul>' + list.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '';
@@ -415,30 +437,42 @@ function buildReport() {
   var hIni = parseNum(F.hIni), hFin = parseNum(F.hFin), hours = 0, t = today();
   if (!isFinite(hIni)) errs.push('Falta el horómetro inicial.');
   if (!isFinite(hFin)) errs.push('Falta el horómetro final.');
+  var dia0 = isFinite(hIni) && isFinite(hFin) && hFin === hIni && sinTrabajo();
   if (isFinite(hIni) && isFinite(hFin)) {
     hours = r1(hFin - hIni);
-    if (hours <= 0) errs.push('El horómetro final tiene que ser mayor que el inicial.');
+    if (dia0) hours = 0;
+    else if (hours <= 0) errs.push('El horómetro final tiene que ser mayor que el inicial.');
     else if (hours > 24) errs.push('Son más de 24 horas. Revisá el horómetro final.');
     else if (hours > 14) flags.push('Más de 14 horas en un informe');
   }
   if (!F.date || F.date > t) errs.push('La fecha no puede ser de un día futuro.');
   else if (F.date !== t) flags.push('Fecha distinta de hoy');
   var lines = [], ls = lineList();
-  if (!F.works.length) errs.push('Elegí al menos un trabajo realizado.');
-  F.works.forEach(function (wid) { var w = workById(wid); if (w && w.items.length && !ls.some(function (l) { return l.w === wid; })) errs.push('Elegí para qué ítem hiciste «' + w.name + '».'); });
-  if (ls.length === 1) lines.push({ w: ls[0].w, i: ls[0].i, h: hours > 0 ? hours : 0 });
+  if (!F.works.length && !dia0) errs.push('Elegí al menos un trabajo realizado.');
+  if (!dia0) F.works.forEach(function (wid) { var w = workById(wid); if (w && w.items.length && !ls.some(function (l) { return l.w === wid; })) errs.push('Elegí para qué ítem hiciste «' + w.name + '».'); });
+  if (dia0) { /* sin líneas */ } else if (ls.length === 1) lines.push({ w: ls[0].w, i: ls[0].i, h: hours > 0 ? hours : 0 });
   else if (ls.length > 1) {
     var s = 0; ls.forEach(function (l) { var v = parseNum(F.hrs[l.k]); if (!isFinite(v) || v < 0) v = 0; v = r1(v); lines.push({ w: l.w, i: l.i, h: v }); s += v; }); s = r1(s);
     if (hours > 0 && Math.abs(s - hours) > 0.05) errs.push('Las horas de los trabajos suman ' + fmt(s) + ' y tienen que sumar ' + fmt(hours) + '.');
     else if (lines.some(function (l) { return !(l.h > 0); })) errs.push('Falta repartir horas en uno de los trabajos. Si no lo hiciste, sacalo.');
   }
-  ls.forEach(function (l, k) {
+  if (!dia0) ls.forEach(function (l, k) {
     if (!l.i) return;
     var p = F.prog[l.k] || {}, a = parseProg(p.a), b = parseProg(p.b), nm = lineLabel(l);
     if (!a || !b) errs.push('Completá la progresiva desde y hasta de «' + nm + '» (ej. 102+120).');
     else if (a.m === b.m) errs.push('La progresiva desde y hasta de «' + nm + '» no pueden ser iguales.');
     else if (lines[k]) { lines[k].pi = a.txt; lines[k].pf = b.txt; }
   });
+  var nov = null, N = F.nov;
+  if (N.t) {
+    var np = parseNum(N.stop);
+    if (N.t === 'averia' && !N.sub) errs.push('Elegí qué se averió.');
+    if (!isFinite(np) || np <= 0) errs.push('Escribí cuántas horas estuvo parada la máquina.');
+    else if (np > 24) errs.push('Las horas de parada no pueden ser más de 24.');
+    if (N.t === 'otra' && !F.notes.trim()) errs.push('Contanos qué pasó en «Otra».');
+    if (isFinite(np) && np > 0 && np <= 24) nov = { t: N.t, sub: N.t === 'averia' ? N.sub : '', stop: r1(np) };
+    if (N.t === 'averia') flags.push('Avería' + (N.sub ? ' (' + (AV_N[N.sub] || N.sub) + ')' : ''));
+  }
   var fuel = null;
   if (F.fuel === null) errs.push('Contestá si cargaste combustible.');
   else if (F.fuel) {
@@ -449,22 +483,151 @@ function buildReport() {
     if (L > 0 && isFinite(fh)) fuel = { type: F.ftype, liters: L, horo: fh };
   }
   if (F.unlock && !F.first && isFinite(hIni) && Math.abs(hIni - m.horo) > 0.05) flags.push('Horómetro inicial distinto al último registrado (' + fmt(m.horo) + ')');
-  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, lines: lines, fuel: fuel, notes: F.notes.trim(), flags: flags, createdAt: new Date().toISOString() }, hours: hours };
+  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, lines: lines, fuel: fuel, nov: nov, notes: F.notes.trim(), flags: flags, createdAt: new Date().toISOString() }, hours: hours };
 }
 function submitForm() {
   var b = buildReport(); if (b.errs.length) { showErrs(b.errs); return; }
   var r = b.report, m = S.machines[r.machineId];
   S.queue.push({ opId: S.session.opId, r: r });
   m.horo = Math.max(m.horo, r.hFin);
-  S.last = { id: r.id, date: r.date, machineCode: m.code, hIni: r.hIni, hFin: r.hFin, hours: b.hours, lines: r.lines.map(function (l) { return { label: lineLabel(l), h: l.h, pi: l.pi, pf: l.pf }; }), fuel: r.fuel, flags: r.flags };
+  S.last = { id: r.id, date: r.date, machineCode: m.code, hIni: r.hIni, hFin: r.hFin, hours: b.hours, lines: r.lines.map(function (l) { return { label: lineLabel(l), h: l.h, pi: l.pi, pf: l.pf }; }), fuel: r.fuel, nov: r.nov, flags: r.flags };
   save(); go('done'); syncNow();
 }
 function doneView() {
   var r = S.last; if (!r) return '';
   var it = r.lines.map(function (l) { return l.label + (l.pi ? ' (' + l.pi + ' a ' + l.pf + (r.lines.length > 1 ? ', ' + fmt(l.h) + ' h' : '') + ')' : (r.lines.length > 1 ? ' (' + fmt(l.h) + ' h)' : '')); }).join(', ');
   var enCola = S.queue.some(function (q) { return q.r.id === r.id; });
-  var estado = enCola ? '<div class="callout warn" style="text-align:left">Guardado en este celular. Se envía solo cuando haya señal.</div>' : '<div class="callout ok" style="text-align:left">Enviado a la planilla ✓</div>';
+  var estado = enCola ? '<div class="callout warn" style="text-align:left">Guardado en este celular. Se envía solo cuando haya señal.</div>' : '<div class="callout ok" style="text-align:left">Recibido por División de Equipos y Maquinaria ✓</div>';
   return '<div class="done stack"><div class="check">✓</div><h1 class="big">Informe cargado</h1><dl class="sum"><dt>Máquina</dt><dd class="mono">' + esc(r.machineCode) + '</dd><dt>Fecha</dt><dd>' + esc(dlong(r.date)) + '</dd><dt>Horas</dt><dd class="mono">' + fmt(r.hours) + ' h (' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + ')</dd><dt>Trabajos</dt><dd>' + esc(it) + '</dd><dt>Combustible</dt><dd>' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L de ' + esc(r.fuel.type) : 'No cargó') + '</dd></dl>' + estado + (r.flags.length ? '<div class="callout warn" style="text-align:left">Tu supervisor va a revisar este informe: ' + esc(r.flags.join('; ')) + '.</div>' : '') + '<button class="btn primary" data-act="home">Listo</button></div>';
+}
+
+
+/* ---------- operador: mis informes (respaldo) ---------- */
+function histItems() {
+  var H = S.hist, own = S.session ? S.session.opId : '', byId = {}, out = [];
+  (H.opId === own ? H.list : []).forEach(function (r) { byId[r.id] = 1; out.push(r); });
+  mineQueue().forEach(function (q) {
+    if (byId[q.r.id]) return; var r = q.r;
+    out.push({ id: r.id, date: r.date, machineId: r.machineId, machineCode: mcode(r.machineId), hIni: r.hIni, hFin: r.hFin, hours: r1(r.hFin - r.hIni), lines: r.lines, fuel: r.fuel, nov: r.nov || null, notes: r.notes, rec: '', local: true });
+  });
+  out.sort(function (a, b) { return a.date === b.date ? (a.local ? -1 : 0) : (a.date < b.date ? 1 : -1); });
+  return out;
+}
+function loadHist() {
+  var H = S.hist; if (!S.session || S.session.role !== 'op') return;
+  H.loading = true; H.err = '';
+  api('myReports', { opId: S.session.opId, pin: S.session.pinH }).then(function (res) {
+    H.opId = S.session.opId; H.list = res.reports || []; H.at = new Date().toISOString(); H.loading = false; save(); if (S.view === 'hist') render();
+  }).catch(function (e) {
+    H.loading = false; H.err = e && e.offline ? 'offline' : errMsg(e);
+    if (e && e.error === 'bad_pin') { authLost(e); render(); return; }
+    if (S.view === 'hist') render();
+  });
+}
+function histLineText(l) {
+  var w = workById(l.w), nm = (w ? w.name : l.w) + (l.i ? ' → ' + itemName(l.i) : '');
+  return { name: nm, h: l.h, prog: l.pi ? l.pi + ' a ' + l.pf : '' };
+}
+function histLines(r) {
+  if (r.lines && r.lines.length) return r.lines.map(histLineText);
+  return Object.keys(r.items || {}).map(function (k) { return { name: ITEM_N[k] || k, h: r.items[k], prog: '' }; });
+}
+function histView() {
+  var H = S.hist, h = '<div class="stack"><button class="link" data-act="' + (H.open ? 'hlist' : 'home') + '" style="align-self:flex-start">← Volver</button>';
+  var it = null; histItems().forEach(function (r) { if (r.id === H.open) it = r; });
+  if (H.open && it) return h + histDetail(it) + '</div>';
+  var all = histItems(), lim = H.range === '30' ? addDays(today(), -29) : '', list = all.filter(function (r) { return !lim || r.date >= lim; });
+  h += '<h1 class="big">Mis informes</h1><p class="muted" style="margin:0">Acá queda tu respaldo de todo lo que cargaste.</p>';
+  h += '<div class="tabs2"><button data-act="hrange" data-v="30" aria-pressed="' + (H.range === '30') + '">Últimos 30 días</button><button data-act="hrange" data-v="all" aria-pressed="' + (H.range === 'all') + '">Todos</button></div>';
+  if (H.loading && !all.length) h += '<p class="muted">Cargando…</p>';
+  if (H.err === 'offline') h += '<div class="callout warn">Sin señal: se muestra lo último que se descargó' + (H.at ? ' (' + esc(fmtRec(H.at)) + ')' : '') + '.</div>';
+  else if (H.err) h += '<div class="callout">' + esc(H.err) + '</div>';
+  if (!list.length && !H.loading) h += '<div class="card"><p class="muted" style="margin:0">' + (all.length ? 'No hay informes en los últimos 30 días.' : 'Todavía no tenés informes cargados.') + '</p></div>';
+  h += list.slice(0, H.shown).map(function (r) {
+    var st = r.local ? '<span class="pill warn">Sin enviar</span>' : '<span class="pill ok">Recibido ✓</span>';
+    return '<button class="hitem" data-act="hopen" data-id="' + esc(r.id) + '"><div class="hrw"><b>' + esc(dlong(r.date)) + '</b>' + st + '</div><div class="hrw sub"><span class="mono">' + esc(r.machineCode) + '</span><span>' + (r.hours > 0 ? fmt(r.hours) + ' h' : 'Sin horas') + (r.nov ? ' · ' + esc(NOV_N[r.nov.t] || 'Novedad') : '') + '</span></div></button>';
+  }).join('');
+  if (list.length > H.shown) h += '<button class="btn" data-act="hmore">Mostrar más</button>';
+  return h + '</div>';
+}
+function histDetail(r) {
+  var m = S.machines[r.machineId], op = S.operators[S.session.opId], ls = histLines(r), many = ls.length > 1;
+  var h = '<div><div class="muted">Informe del</div><h1 class="big" style="font-size:1.75rem">' + esc(dfullY(r.date).toLowerCase()) + '</h1></div>';
+  h += '<dl class="sum"><dt>Máquina</dt><dd><span class="mono">' + esc(r.machineCode) + '</span>' + (m ? '<div class="muted small" style="font-weight:400">' + esc(m.name) + '</div>' : '') + '</dd>';
+  h += '<dt>Operador</dt><dd>' + esc(op ? op.name : '') + '</dd>';
+  h += '<dt>Horómetro</dt><dd class="mono">' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + '</dd><dt>Horas</dt><dd class="mono">' + fmt(r.hours) + ' h</dd>';
+  h += '<dt>Trabajos</dt><dd>' + (ls.length ? ls.map(function (l) { return '<div class="hl">' + esc(l.name) + (l.prog ? '<div class="muted small" style="font-weight:400">Progresiva ' + esc(l.prog) + (many ? ' · ' + fmt(l.h) + ' h' : '') + '</div>' : (many ? '<div class="muted small" style="font-weight:400">' + fmt(l.h) + ' h</div>' : '')) + '</div>'; }).join('') : 'Sin trabajo (máquina parada)') + '</dd>';
+  h += '<dt>Combustible</dt><dd>' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L de ' + esc(r.fuel.type) + '<div class="muted small" style="font-weight:400">Horómetro al cargar: ' + fmt(r.fuel.horo) + '</div>' : 'No cargó') + '</dd>';
+  h += '<dt>Novedades</dt><dd>' + (r.nov ? esc(novText(r.nov)) : 'Sin novedad') + '</dd>';
+  if (r.notes) h += '<dt>Detalle</dt><dd style="font-weight:500">' + esc(r.notes) + '</dd>';
+  h += '<dt>Comprobante</dt><dd class="mono">' + esc(comprobante(r.id)) + '</dd></dl>';
+  if (r.local) h += '<div class="callout warn" style="text-align:left">Guardado en este celular. Todavía no llegó: se envía solo cuando haya señal.</div>';
+  else h += '<div class="callout ok" style="text-align:left">Recibido por División de Equipos y Maquinaria ✓' + (r.rec ? '<div class="small" style="font-weight:500;margin-top:2px">' + esc(fmtRec(r.rec)) + '</div>' : '') + '</div><button class="btn" data-act="share" data-id="' + esc(r.id) + '"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Compartir como imagen</button>';
+  return h;
+}
+/* imagen del informe para compartir (se dibuja en un canvas) */
+function wrapText(c, text, x, y, maxW, lh) {
+  var words = String(text).split(' '), line = '', yy = y;
+  words.forEach(function (w) { var t = line ? line + ' ' + w : w; if (c.measureText(t).width > maxW && line) { c.fillText(line, x, yy); line = w; yy += lh; } else line = t; });
+  if (line) { c.fillText(line, x, yy); yy += lh; }
+  return yy;
+}
+function reportImage(r) {
+  return new Promise(function (resolve) {
+    var W = 1080, P = 56, fam = (getComputedStyle(document.body).fontFamily || 'sans-serif');
+    var m = S.machines[r.machineId], op = S.operators[S.session.opId], ls = histLines(r), many = ls.length > 1;
+    var rows = [['Máquina', r.machineCode + (m ? ' · ' + m.name : '')], ['Operador', op ? op.name : ''], ['Horómetro', fmt(r.hIni) + ' → ' + fmt(r.hFin)], ['Horas', fmt(r.hours) + ' h']];
+    rows.push(['Trabajos', ls.length ? ls.map(function (l) { return '• ' + l.name + (l.prog ? ' (progresiva ' + l.prog + (many ? ', ' + fmt(l.h) + ' h' : '') + ')' : (many ? ' (' + fmt(l.h) + ' h)' : '')); }).join('\n') : 'Sin trabajo (máquina parada)']);
+    rows.push(['Combustible', r.fuel ? fmt(r.fuel.liters, 0) + ' L de ' + r.fuel.type + ' (horómetro ' + fmt(r.fuel.horo) + ')' : 'No cargó']);
+    rows.push(['Novedades', r.nov ? novText(r.nov) : 'Sin novedad']);
+    if (r.notes) rows.push(['Detalle', r.notes]);
+    var cv = document.createElement('canvas'), c = cv.getContext('2d');
+    function draw(logo, H) {
+      cv.width = W; cv.height = H; c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H); c.textBaseline = 'alphabetic';
+      var y = P;
+      if (logo && logo.width) { var lw = 220, lh = logo.height * lw / logo.width; c.drawImage(logo, P, y, lw, lh); y += lh + 28; } else y += 10;
+      c.fillStyle = '#d31f16'; c.fillRect(P, y, 64, 6); y += 40;
+      c.fillStyle = '#666666'; c.font = '600 28px ' + fam; c.fillText('INFORME DIARIO DE EQUIPOS', P, y); y += 52;
+      c.fillStyle = '#0e0e0e'; c.font = '700 46px ' + fam; y = wrapText(c, dfullY(r.date), P, y, W - 2 * P, 54); y += 6;
+      c.fillStyle = '#666666'; c.font = '500 28px ' + fam; c.fillText('Comprobante N.º ' + comprobante(r.id), P, y); y += 44;
+      c.strokeStyle = '#dadada'; c.lineWidth = 2; c.beginPath(); c.moveTo(P, y); c.lineTo(W - P, y); c.stroke(); y += 18;
+      rows.forEach(function (row) {
+        c.fillStyle = '#666666'; c.font = '500 26px ' + fam; c.fillText(row[0], P, y + 30);
+        c.fillStyle = '#0e0e0e'; c.font = '600 30px ' + fam;
+        var yy = y + 32; String(row[1]).split('\n').forEach(function (pt) { yy = wrapText(c, pt, P + 250, yy, W - 2 * P - 250, 40); });
+        y = Math.max(yy, y + 46) + 10;
+        c.strokeStyle = '#ececec'; c.beginPath(); c.moveTo(P, y - 4); c.lineTo(W - P, y - 4); c.stroke();
+      });
+      y += 22;
+      c.fillStyle = '#e3f4e8'; c.beginPath(); if (c.roundRect) c.roundRect(P, y, W - 2 * P, 112, 22); else c.rect(P, y, W - 2 * P, 112); c.fill();
+      c.fillStyle = '#176b34'; c.font = '700 32px ' + fam; c.fillText('Recibido por División de Equipos y Maquinaria ✓', P + 28, y + 50);
+      c.font = '500 26px ' + fam; c.fillText(fmtRec(r.rec), P + 28, y + 90);
+      return y + 112 + P;
+    }
+    function finish(logo) {
+      var H = draw(logo, 3000); // primera pasada para medir el alto
+      draw(logo, H);
+      if (cv.toBlob) cv.toBlob(function (b) { resolve(b); }, 'image/png'); else resolve(null);
+    }
+    var img = new Image(); img.onload = function () { finish(img); }; img.onerror = function () { finish(null); }; img.src = 'icons/logo.png';
+  });
+}
+function shareReport(id) {
+  var r = null; histItems().forEach(function (x) { if (x.id === id) r = x; }); if (!r) return;
+  toast('Preparando la imagen…');
+  reportImage(r).then(function (blob) {
+    if (!blob) { toast('No se pudo crear la imagen.'); return; }
+    var name = 'informe-' + r.machineCode + '-' + r.date + '.png', file = null;
+    try { file = new File([blob], name, { type: 'image/png' }); } catch (e) {}
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: 'Informe del ' + dfullY(r.date) + ' · ' + r.machineCode }).catch(function (e) { if (e && e.name !== 'AbortError') downloadBlob(blob, name); });
+    }
+    downloadBlob(blob, name);
+  });
+}
+function downloadBlob(blob, name) {
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500); toast('Imagen guardada en tu celular.');
 }
 
 /* ---------- supervisor ---------- */
@@ -481,13 +644,13 @@ function loadSup() {
     .catch(function (e) { S.supLoading = false; render(); toast(e && e.offline ? 'Sin señal: no se pudo actualizar.' : errMsg(e)); });
 }
 function supFail(e) { toast(e && e.offline ? 'Sin señal: no se pudo guardar.' : errMsg(e)); }
-function filt() {
-  var f = S.f; return S.sup.reports.filter(function (r) { return f.machine === 'all' || r.machineId === f.machine; });
+function filt(mach) {
+  var f = S.f, mm = mach == null ? f.machine : mach; return S.sup.reports.filter(function (r) { return mm === 'all' || r.machineId === mm; });
 }
 function workdays(a, b) { var n = 0, p = a.split('-'), q = b.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]), e = new Date(+q[0], +q[1] - 1, +q[2]); for (; d <= e; d.setDate(d.getDate() + 1)) if (d.getDay() !== 0) n++; return n; }
-function stats() {
-  var rs = filt(), f = S.f, wd = workdays(f.from, f.to), sh = S.sup.config.shiftHours || 9, fp = S.sup.config.fuelPrice || 0;
-  var ms = S.sup.machines.filter(function (m) { return f.machine === 'all' || m.id === f.machine; });
+function stats(mach) {
+  var mm = mach == null ? S.f.machine : mach, rs = filt(mm), f = S.f, wd = workdays(f.from, f.to), sh = S.sup.config.shiftHours || 9, fp = S.sup.config.fuelPrice || 0;
+  var ms = S.sup.machines.filter(function (m) { return mm === 'all' || m.id === mm; });
   var byM = {}; S.sup.machines.forEach(function (m) { byM[m.id] = m; });
   var rows = ms.map(function (m) {
     var x = rs.filter(function (r) { return r.machineId === m.id; }), days = {}, h = 0, L = 0;
@@ -514,54 +677,206 @@ function bars(rows, fmtv, max) {
   var mx = max || Math.max.apply(null, rows.map(function (r) { return r.v; }).concat([0.0001]));
   return rows.map(function (r) { return '<div class="brow"><span class="lb" title="' + esc(r.l) + '">' + esc(r.l) + '</span><span class="track"><span class="fill" style="width:' + Math.max(r.v / mx * 100, r.v > 0 ? 1.5 : 0) + '%"></span></span><span class="vl">' + fmtv(r.v) + '</span></div>'; }).join('') || '<p class="muted small">Sin datos en este período.</p>';
 }
+var EX_MODES = [['maq', 'Por máquina'], ['item', 'Por ítem'], ['op', 'Por operador'], ['av', 'Averías']];
 function supView() {
-  var tabs = [['panel', 'Panel'], ['informes', 'Informes'], ['solicitudes', 'Solicitudes']];
+  var tabs = [['panel', 'Panel'], ['explorar', 'Explorar'], ['informes', 'Informes'], ['solicitudes', 'Solicitudes']];
   var rev = S.sup.reports.filter(function (r) { return r.status === 'validar'; }).length, pend = S.sup.requests.filter(function (r) { return r.status === 'pendiente'; }).length;
   var badge = { informes: rev, solicitudes: pend };
   var h = '<nav class="nav" aria-label="Secciones">' + tabs.map(function (t) { return '<button data-act="tab" data-t="' + t[0] + '"' + (S.tab === t[0] ? ' aria-current="page"' : '') + '>' + t[1] + (badge[t[0]] ? '<span class="pill warn">' + badge[t[0]] + '</span>' : '') + '</button>'; }).join('') + '<button data-act="refresh" style="margin-left:auto">Actualizar</button></nav>';
   h += '<div' + (S.supLoading ? ' class="loading"' : '') + '>';
-  if (S.tab === 'panel') h += filtersHTML() + panelView();
-  else if (S.tab === 'informes') h += filtersHTML() + informesView();
+  if (S.tab === 'panel') h += filtersHTML(false) + panelView();
+  else if (S.tab === 'explorar') h += exploreView();
+  else if (S.tab === 'informes') h += filtersHTML(true) + informesView();
   else h += solicitudesView();
   return h + '</div>';
 }
-function filtersHTML() {
+function periodHTML() {
   var f = S.f;
-  return '<div class="filters"><label>Desde<input type="date" id="fl-from" data-in="ffrom" value="' + f.from + '"></label><label>Hasta<input type="date" id="fl-to" data-in="fto" value="' + f.to + '"></label><label>Máquina<select id="fl-m" data-in="fm"><option value="all">Todas</option>' + S.sup.machines.map(function (m) { return '<option value="' + esc(m.id) + '"' + (f.machine === m.id ? ' selected' : '') + '>' + esc(m.code) + ' · ' + esc(m.name) + '</option>'; }).join('') + '</select></label><div style="display:flex;gap:6px"><button class="btn sm" data-act="range" data-d="7">7 días</button><button class="btn sm" data-act="range" data-d="30">30 días</button><button class="btn sm" data-act="range" data-d="0">Este mes</button></div></div>';
+  return '<label>Desde<input type="date" id="fl-from" data-in="ffrom" value="' + f.from + '"></label><label>Hasta<input type="date" id="fl-to" data-in="fto" value="' + f.to + '"></label>';
 }
+function rangeBtns() { return '<div style="display:flex;gap:6px"><button class="btn sm" data-act="range" data-d="7">7 días</button><button class="btn sm" data-act="range" data-d="30">30 días</button><button class="btn sm" data-act="range" data-d="0">Este mes</button></div>'; }
+function filtersHTML(withM) {
+  var f = S.f;
+  return '<div class="filters">' + periodHTML() + (withM ? '<label>Máquina<select id="fl-m" data-in="fm"><option value="all">Todas</option>' + S.sup.machines.map(function (m) { return '<option value="' + esc(m.id) + '"' + (f.machine === m.id ? ' selected' : '') + '>' + esc(m.code) + ' · ' + esc(m.name) + '</option>'; }).join('') + '</select></label>' : '') + rangeBtns() + '</div>';
+}
+function dayList() {
+  var out = [], f = S.f, a = f.from, b = f.to; if (a > b) return out;
+  var d = b, n = 0; while (d >= a && n < 14) { out.unshift(d); d = addDays(d, -1); n++; }
+  return out;
+}
+function opsOfMachine(id) { return S.sup.operators.filter(function (o) { return o.machineId === id; }); }
 function panelView() {
-  var s = stats(), h = '', cfg = S.sup.config;
-  var rev = s.rs.filter(function (r) { return r.status === 'validar'; }).length;
-  if (rev) h += '<div class="callout warn" style="margin-bottom:16px">Hay ' + rev + ' informe' + (rev > 1 ? 's' : '') + ' marcado' + (rev > 1 ? 's' : '') + ' para revisar en este período. <button class="link" data-act="tab" data-t="informes">Verlos</button></div>';
+  var s = stats('all'), cfg = S.sup.config, t = today(), h = '';
+  var assigned = {}; S.sup.operators.forEach(function (o) { if (o.machineId) assigned[o.machineId] = 1; });
+  var hoyRep = {}; S.sup.reports.forEach(function (r) { if (r.date === t) hoyRep[r.machineId] = 1; });
+  var hoyOk = S.f.to >= t;
+  var expected = S.sup.machines.filter(function (m) { return assigned[m.id] || hoyRep[m.id]; });
+  var con = expected.filter(function (m) { return hoyRep[m.id]; }).length, sin = expected.filter(function (m) { return !hoyRep[m.id]; });
   var lph = s.H > 0 && s.L > 0 ? s.L / s.H : null;
-  h += '<div class="kpis"><div class="kpi"><span class="eyebrow">Horas trabajadas</span><span class="v">' + fmt(s.H) + '<small>h</small></span></div><div class="kpi"><span class="eyebrow">Combustible cargado</span><span class="v">' + fmt(s.L, 0) + '<small>L</small></span></div><div class="kpi"><span class="eyebrow">Consumo medio</span><span class="v">' + (lph ? fmt(lph) : '—') + '<small>L/h</small></span></div><div class="kpi"><span class="eyebrow">Costo estimado</span><span class="v">' + gs(s.C) + '</span></div></div>';
-  var byM = s.rows.slice().sort(function (a, b) { return b.hours - a.hours; }).map(function (r) { return { l: r.m.code, v: r.hours }; });
-  var byI = Object.keys(s.items).map(function (k) { return { l: s.items[k].label + (s.items[k].apoyo ? ' (apoyo)' : ''), v: s.items[k].h }; }).sort(function (a, b) { return b.v - a.v; });
-  var fuelRows = s.rows.filter(function (r) { return r.lph && r.ref; }).sort(function (a, b) { return (b.lph / b.ref) - (a.lph / a.ref); });
-  var fmx = Math.max.apply(null, fuelRows.map(function (r) { return Math.max(r.lph, r.ref); }).concat([1])) * 1.1;
-  var fh = fuelRows.map(function (r) {
-    var d = r.lph / r.ref - 1, st = d > 0.15 ? '<span class="pill warn">▲ Alto</span>' : d < -0.25 ? '<span class="pill info">▼ Bajo</span>' : '<span class="pill ok">● Normal</span>';
-    return '<div class="brow" style="grid-template-columns:minmax(4.5rem,6rem) 1fr 4.2rem 5.2rem"><span class="lb">' + esc(r.m.code) + '</span><span class="track"><span class="fill" style="width:' + r.lph / fmx * 100 + '%"></span><span class="tick" style="left:calc(' + r.ref / fmx * 100 + '% - 1px)"></span></span><span class="vl">' + fmt(r.lph) + '</span>' + st + '</div>';
-  }).join('') || '<p class="muted small">Sin cargas de combustible en este período.</p>';
-  var util = s.rows.slice().sort(function (a, b) { return b.util - a.util; }).map(function (r) { return { l: r.m.code, v: r.util * 100 }; });
-  h += '<div class="panels"><section class="panel"><h2>Horas por máquina</h2><div class="sub">Suma de horas de los informes</div>' + bars(byM, function (v) { return fmt(v) + ' h'; }) + '</section>' +
-    '<section class="panel"><h2>Horas por ítem del certificado</h2><div class="sub">Todas las máquinas del filtro</div>' + bars(byI, function (v) { return fmt(v) + ' h'; }) + '</section>' +
-    '<section class="panel"><h2>Rendimiento de combustible</h2><div class="sub">Litros cargados ÷ horas trabajadas</div><div class="legend"><span><i class="fill" style="position:static;display:inline-block;width:18px;height:8px;border-radius:2px"></i>Consumo real (L/h)</span><span><i class="tick" style="position:static;display:inline-block;height:12px"></i>Referencia</span></div>' + fh + '</section>' +
-    '<section class="panel"><h2>Utilización de las máquinas</h2><div class="sub">Horas trabajadas ÷ horas programadas (' + fmt(cfg.shiftHours || 9, 0) + ' h por día, lunes a sábado)</div>' + bars(util, function (v) { return fmt(v, 0) + ' %'; }, 100) + '</section></div>';
-  h += '<div class="sec"><h2>Resumen por máquina</h2></div><div class="tblw"><table><thead><tr><th>Máquina</th><th class="n">Días</th><th class="n">Horas</th><th class="n">Hs/día</th><th class="n">Utiliz.</th><th class="n">Litros</th><th class="n">L/h</th><th class="n">Ref. L/h</th><th class="n">Costo</th></tr></thead><tbody>' + s.rows.map(function (r) { return '<tr><td><b>' + esc(r.m.code) + '</b><div class="muted small">' + esc(r.m.name) + '</div></td><td class="n">' + r.days + '</td><td class="n">' + fmt(r.hours) + '</td><td class="n">' + fmt(r.hpd) + '</td><td class="n">' + fmt(r.util * 100, 0) + ' %</td><td class="n">' + fmt(r.liters, 0) + '</td><td class="n">' + (r.lph ? fmt(r.lph) : '—') + '</td><td class="n">' + fmt(r.ref || 0, 0) + '</td><td class="n">' + gs(r.cost) + '</td></tr>'; }).join('') + '<tr><td><b>Total</b></td><td class="n"></td><td class="n"><b>' + fmt(s.H) + '</b></td><td class="n"></td><td class="n"></td><td class="n"><b>' + fmt(s.L, 0) + '</b></td><td class="n"></td><td class="n"></td><td class="n"><b>' + gs(s.C) + '</b></td></tr></tbody></table></div>';
+  h += '<div class="kpis"><div class="kpi"><span class="eyebrow">Horas trabajadas</span><span class="v">' + fmt(s.H) + '<small>h</small></span></div><div class="kpi"><span class="eyebrow">Máquinas con informe hoy</span><span class="v">' + (hoyOk ? con + '<small>de ' + expected.length + '</small>' : '—') + '</span></div><div class="kpi"><span class="eyebrow">Combustible cargado</span><span class="v">' + fmt(s.L, 0) + '<small>L</small></span></div><div class="kpi"><span class="eyebrow">Consumo medio</span><span class="v">' + (lph ? fmt(lph) : '—') + '<small>L/h</small></span></div><div class="kpi"><span class="eyebrow">Costo estimado</span><span class="v">' + (s.C >= 1e6 ? '₲ ' + fmt(s.C / 1e6, 1) + '<small>M</small>' : gs(s.C)) + '</span></div></div>';
+  // para revisar
+  var rev = S.sup.reports.filter(function (r) { return r.status === 'validar'; }).length, pend = S.sup.requests.filter(function (r) { return r.status === 'pendiente'; }).length;
+  var desde7 = addDays(t, -6), av7 = S.sup.reports.filter(function (r) { return r.nov && r.nov.t === 'averia' && r.date >= desde7; }).length;
+  function rv(n, txt, act, lbl, d) { return '<div class="rv' + (n ? '' : ' zero') + '"><span class="pill ' + (n ? (act === 'goav' ? 'crit' : 'warn') : '') + '">' + n + '</span><span>' + txt + '</span>' + (n ? '<button class="link" data-act="' + act + '"' + (d || '') + '>' + lbl + '</button>' : '') + '</div>'; }
+  var rvh = rv(rev, 'informes marcados a revisar', 'tab" data-t="informes', 'Ver') + rv(pend, 'solicitudes de máquina pendientes', 'tab" data-t="solicitudes', 'Ver') + rv(av7, 'averías en los últimos 7 días', 'goav', 'Ver') + (hoyOk ? rv(sin.length, 'máquinas sin informe hoy', 'miss', S.showMiss ? 'Ocultar' : 'Ver cuáles') : '');
+  if (S.showMiss && hoyOk) rvh += '<div class="chips" style="margin-top:4px">' + sin.map(function (m) { var o = opsOfMachine(m.id)[0]; return '<span class="pill" title="' + esc(o ? o.name : '') + '">' + esc(m.code) + (o ? ' · ' + esc(o.name.split(' ')[0]) : '') + '</span>'; }).join('') + '</div>';
+  var cardRev = '<section class="panel alert"><h2>Para revisar</h2><div class="sub">Lo que necesita tu atención ahora</div>' + rvh + '</section>';
+  // horas por día
+  var days = dayList(), byDay = {}; S.sup.reports.forEach(function (r) { byDay[r.date] = (byDay[r.date] || 0) + r.hours; });
+  var mxd = Math.max.apply(null, days.map(function (d) { return byDay[d] || 0; }).concat([1]));
+  var cardDay = '<section class="panel"><h2>Horas por día</h2><div class="sub">Todas las máquinas · ' + (days.length >= 14 ? 'últimos 14 días del período' : days.length + ' día' + (days.length === 1 ? '' : 's')) + '</div><div class="vbars">' + days.map(function (d) { var v = byDay[d] || 0, p = d.split('-'), wd = new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString('es-PY', { weekday: 'short' }).slice(0, 3); return '<div class="vb" title="' + esc(dmy(d)) + ': ' + fmt(v) + ' h"><span class="vbar" style="height:' + (v ? Math.max(v / mxd * 100, 3) : 0) + '%"></span><span class="vlb">' + esc(wd) + '<br>' + (+p[2]) + '</span></div>'; }).join('') + '</div></section>';
+  // ítems y máquinas
+  var byI = Object.keys(s.items).map(function (k) { return { l: s.items[k].label + (s.items[k].apoyo ? ' (apoyo)' : ''), v: s.items[k].h }; }).sort(function (a, b) { return b.v - a.v; }).slice(0, 6);
+  var cardItem = '<section class="panel"><h2>Horas por ítem del certificado</h2><div class="sub">Los 6 con más horas</div>' + bars(byI, function (v) { return fmt(v) + ' h'; }) + '<button class="link" data-act="goex" data-m="item" style="margin-top:10px">Ver todos los ítems →</button></section>';
+  var byM = s.rows.slice().sort(function (a, b) { return b.hours - a.hours; }).slice(0, 6).filter(function (r) { return r.hours > 0; }).map(function (r) { return { l: r.m.code, v: r.hours }; });
+  var cardMaq = '<section class="panel"><h2>Máquinas con más horas</h2><div class="sub">Las 6 primeras</div>' + bars(byM, function (v) { return fmt(v) + ' h'; }) + '<button class="link" data-act="goex" data-m="maq" style="margin-top:10px">Ver todas las máquinas →</button></section>';
+  // combustible fuera de lo normal
+  var fz = s.rows.filter(function (r) { return r.lph && r.ref; }).map(function (r) { return { r: r, d: r.lph / r.ref - 1 }; }).filter(function (x) { return x.d > 0.15 || x.d < -0.25; }).sort(function (a, b) { return Math.abs(b.d) - Math.abs(a.d); }).slice(0, 4);
+  var fh = fz.map(function (x) { var r = x.r, up = x.d > 0; return '<div class="fz"><div><b class="mono">' + esc(r.m.code) + '</b><div class="muted small">' + fmt(r.lph) + ' L/h · referencia ' + fmt(r.ref, 0) + '</div></div><span class="pill ' + (up ? 'warn' : 'info') + '">' + (up ? '▲ +' : '▼ −') + fmt(Math.abs(x.d) * 100, 0) + ' %</span></div>'; }).join('') || '<p class="muted small">Ningún consumo fuera de lo normal en este período.</p>';
+  var cardFuel = '<section class="panel"><h2>Combustible fuera de lo normal</h2><div class="sub">Consumo real contra referencia</div>' + fh + '</section>';
+  // utilización por tipo
+  var ty = {}; s.rows.forEach(function (r) { var k = r.m.name || 'Otras', o = ty[k] || (ty[k] = { h: 0, n: 0, p: 0 }); o.h += r.hours; o.n++; o.p += workdays(S.f.from, S.f.to) * (cfg.shiftHours || 9); });
+  var util = Object.keys(ty).map(function (k) { return { l: k, v: ty[k].p ? ty[k].h / ty[k].p * 100 : 0 }; }).sort(function (a, b) { return b.v - a.v; }).slice(0, 6);
+  var cardUtil = '<section class="panel"><h2>Utilización</h2><div class="sub">Horas trabajadas ÷ horas programadas (' + fmt(cfg.shiftHours || 9, 0) + ' h por día, lunes a sábado)</div>' + bars(util, function (v) { return fmt(v, 0) + ' %'; }, 100) + '</section>';
+  h += '<div class="panels">' + cardRev + cardDay + cardItem + cardMaq + cardFuel + cardUtil + '</div>';
   h += '<p class="muted small" style="margin-top:10px">Costo = horas × tarifa horaria de la máquina + litros × precio del combustible. Para cambiar tarifas, consumos de referencia, máquinas u operadores, editá las hojas de la planilla de Google y tocá «Actualizar».</p>';
-  var ih = Object.keys(s.items).sort(function (a, b) { return s.items[b].h - s.items[a].h; }).map(function (k) { var o = s.items[k]; return '<tr><td>' + esc(o.label) + (o.apoyo ? ' <span class="muted small">(trabajo de apoyo, sin ítem)</span>' : '') + '</td><td class="n">' + fmt(o.h) + '</td><td class="n">' + (s.H ? fmt(o.h / s.H * 100, 0) : 0) + ' %</td><td class="n">' + gs(o.c) + '</td></tr>'; }).join('');
-  h += '<div class="sec"><h2>Detalle por ítem</h2></div><div class="tblw"><table><thead><tr><th>Ítem</th><th class="n">Horas</th><th class="n">% del total</th><th class="n">Costo de máquina</th></tr></thead><tbody>' + (ih || '<tr><td colspan="4" class="muted">Sin datos en este período.</td></tr>') + '</tbody></table></div>';
   return h;
+}
+
+/* ---- Explorar: filtrar y buscar lo que uno busca ---- */
+var EX_INF = [['all', 'Todos'], ['A', 'A · Asfalto'], ['B', 'B · Conformación'], ['C', 'C · Mov. de suelos'], ['D', 'D · Transporte']];
+function exTipos() {
+  if (S.ex.mode === 'av') return [['all', 'Todas'], ['averia', 'Avería'], ['lluvia', 'Lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
+  var seen = {}, out = [['all', 'Todos']]; S.sup.machines.forEach(function (m) { if (m.name && !seen[m.name]) { seen[m.name] = 1; out.push([m.name, m.name]); } });
+  return out;
+}
+function exploreView() {
+  var e = S.ex, h = '<div class="tabs2 four">' + EX_MODES.map(function (m) { return '<button data-act="exmode" data-m="' + m[0] + '" aria-pressed="' + (e.mode === m[0]) + '">' + m[1] + '</button>'; }).join('') + '</div>';
+  var ph = { maq: 'Código, tipo o nombre del operador', item: 'Nombre del ítem', op: 'Nombre del operador', av: 'Máquina, operador o detalle' }[e.mode];
+  h += '<div class="filters" style="margin-top:14px"><label style="flex:1;min-width:12rem">Buscar<input type="search" id="exq" data-in="exq" placeholder="' + ph + '" value="' + esc(e.q) + '" autocomplete="off"></label>' + periodHTML();
+  h += '<label>Informe<select data-in="exinf">' + EX_INF.map(function (x) { return '<option value="' + x[0] + '"' + (e.inf === x[0] ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select></label>';
+  if (e.mode === 'maq' || e.mode === 'av') h += '<label>' + (e.mode === 'av' ? 'Novedad' : 'Tipo') + '<select data-in="extipo">' + exTipos().map(function (x) { return '<option value="' + esc(x[0]) + '"' + (e.tipo === x[0] ? ' selected' : '') + '>' + esc(x[1]) + '</option>'; }).join('') + '</select></label>';
+  h += rangeBtns() + '</div><div id="exres">' + exResults() + '</div>';
+  return h;
+}
+function exReps() { var e = S.ex; return S.sup.reports.filter(function (r) { return e.inf === 'all' || r.inf === e.inf; }); }
+function lowQ() { return S.ex.q.trim().toLowerCase(); }
+function exBuild() {
+  var e = S.ex, q = lowQ(), reps = exReps(), f = S.f, wd = workdays(f.from, f.to), sh = S.sup.config.shiftHours || 9, fp = S.sup.config.fuelPrice || 0, cols, rows;
+  if (e.mode === 'maq') {
+    cols = [
+      { k: 'code', l: 'Máquina', t: function (r) { return r.m.code; }, h: function (r) { var o = opsOfMachine(r.m.id).map(function (x) { return x.name; }).join(', '); return '<b>' + esc(r.m.code) + '</b><div class="muted small">' + esc(r.m.name) + (o ? ' · ' + esc(o) : '') + '</div>'; } },
+      { k: 'inf', l: 'Inf.', t: function (r) { return r.m.inf || '—'; } },
+      { k: 'days', l: 'Días', n: 1, t: function (r) { return r.days; }, f: function (v) { return v; } },
+      { k: 'hours', l: 'Horas', n: 1, t: function (r) { return r.hours; }, f: function (v) { return fmt(v); }, b: 1 },
+      { k: 'hpd', l: 'Hs/día', n: 1, t: function (r) { return r.hpd; }, f: function (v) { return fmt(v); } },
+      { k: 'util', l: 'Utiliz.', n: 1, t: function (r) { return r.util; }, f: function (v) { return fmt(v * 100, 0) + ' %'; } },
+      { k: 'liters', l: 'Litros', n: 1, t: function (r) { return r.liters; }, f: function (v) { return fmt(v, 0); } },
+      { k: 'lph', l: 'L/h', n: 1, t: function (r) { return r.lph || 0; }, f: function (v) { return v ? fmt(v) : '—'; } },
+      { k: 'stop', l: 'H parada', n: 1, t: function (r) { return r.stop; }, f: function (v) { return v ? fmt(v) : '—'; } },
+      { k: 'cost', l: 'Costo', n: 1, t: function (r) { return r.cost; }, f: function (v) { return gs(v); } }
+    ];
+    rows = S.sup.machines.filter(function (m) {
+      if (e.inf !== 'all' && m.inf !== e.inf) return false; if (e.tipo !== 'all' && m.name !== e.tipo) return false;
+      if (q) { var txt = (m.code + ' ' + m.name + ' ' + opsOfMachine(m.id).map(function (o) { return o.name; }).join(' ')).toLowerCase(); if (txt.indexOf(q) < 0) return false; }
+      return true;
+    }).map(function (m) {
+      var x = reps.filter(function (r) { return r.machineId === m.id; }), days = {}, hh = 0, L = 0, st = 0;
+      x.forEach(function (r) { days[r.date] = 1; hh += r.hours; if (r.fuel) L += r.fuel.liters; if (r.nov) st += r.nov.stop || 0; });
+      var nd = Object.keys(days).length, prog = wd * sh;
+      return { key: m.id, m: m, days: nd, hours: hh, liters: L, lph: hh > 0 && L > 0 ? L / hh : 0, hpd: nd ? hh / nd : 0, util: prog ? hh / prog : 0, stop: st, cost: hh * (m.tarifa || 0) + L * fp, reps: x };
+    });
+  } else if (e.mode === 'item') {
+    var mp = {}, byM = {}; S.sup.machines.forEach(function (m) { byM[m.id] = m; });
+    reps.forEach(function (r) { var t = (byM[r.machineId] || {}).tarifa || 0; repLines(r).forEach(function (l) { var o = mp[l.key] || (mp[l.key] = { key: l.key, label: l.label, apoyo: l.apoyo, h: 0, c: 0, ms: {}, en: [] }); o.h += l.h; o.c += l.h * t; o.ms[r.machineId] = 1; o.en.push({ r: r, l: l }); }); });
+    var tot = Object.keys(mp).reduce(function (a, k) { return a + mp[k].h; }, 0);
+    cols = [
+      { k: 'label', l: 'Ítem', t: function (r) { return r.label; }, h: function (r) { return esc(r.label) + (r.apoyo ? ' <span class="muted small">(apoyo, sin ítem)</span>' : ''); } },
+      { k: 'h', l: 'Horas', n: 1, t: function (r) { return r.h; }, f: function (v) { return fmt(v); }, b: 1 },
+      { k: 'pct', l: '% del total', n: 1, t: function (r) { return tot ? r.h / tot : 0; }, f: function (v) { return fmt(v * 100, 0) + ' %'; } },
+      { k: 'nm', l: 'Máquinas', n: 1, t: function (r) { return Object.keys(r.ms).length; }, f: function (v) { return v; } },
+      { k: 'ne', l: 'Registros', n: 1, t: function (r) { return r.en.length; }, f: function (v) { return v; } },
+      { k: 'c', l: 'Costo de máquina', n: 1, t: function (r) { return r.c; }, f: function (v) { return gs(v); } }
+    ];
+    rows = Object.keys(mp).map(function (k) { return mp[k]; }).filter(function (o) { return !q || o.label.toLowerCase().indexOf(q) > -1; });
+  } else if (e.mode === 'op') {
+    cols = [
+      { k: 'name', l: 'Operador', t: function (r) { return r.name; }, h: function (r) { return '<b>' + esc(r.name) + '</b>'; } },
+      { k: 'mach', l: 'Máquina', t: function (r) { return r.mach; }, h: function (r) { return '<span class="mono">' + esc(r.mach || '—') + '</span>'; } },
+      { k: 'days', l: 'Días', n: 1, t: function (r) { return r.days; }, f: function (v) { return v; } },
+      { k: 'hours', l: 'Horas', n: 1, t: function (r) { return r.hours; }, f: function (v) { return fmt(v); }, b: 1 },
+      { k: 'liters', l: 'Litros', n: 1, t: function (r) { return r.liters; }, f: function (v) { return fmt(v, 0); } },
+      { k: 'nov', l: 'Novedades', n: 1, t: function (r) { return r.nov; }, f: function (v) { return v || '—'; } },
+      { k: 'last', l: 'Último informe', n: 1, t: function (r) { return r.last; }, f: function (v) { return v ? dmy(v) : 'Nunca'; } }
+    ];
+    var ops = {}; S.sup.operators.forEach(function (o) { ops[o.id] = { key: o.id, name: o.name, mach: S.machines[o.machineId] ? S.machines[o.machineId].code : (S.sup.machines.filter(function (m) { return m.id === o.machineId; })[0] || {}).code || '', days: 0, hours: 0, liters: 0, nov: 0, last: '', reps: [], d: {} }; });
+    reps.forEach(function (r) { var o = ops[r.operatorId] || (ops[r.operatorId] = { key: r.operatorId, name: r.operatorName, mach: r.machineCode, days: 0, hours: 0, liters: 0, nov: 0, last: '', reps: [], d: {} }); o.d[r.date] = 1; o.hours += r.hours; if (r.fuel) o.liters += r.fuel.liters; if (r.nov) o.nov++; if (r.date > o.last) o.last = r.date; o.reps.push(r); });
+    rows = Object.keys(ops).map(function (k) { var o = ops[k]; o.days = Object.keys(o.d).length; return o; }).filter(function (o) { return !q || (o.name + ' ' + o.mach).toLowerCase().indexOf(q) > -1; });
+  } else {
+    cols = [
+      { k: 'date', l: 'Fecha', t: function (r) { return r.date; }, h: function (r) { return esc(dmy(r.date)); } },
+      { k: 'code', l: 'Máquina', t: function (r) { return r.machineCode; }, h: function (r) { return '<b>' + esc(r.machineCode) + '</b>'; } },
+      { k: 'op', l: 'Operador', t: function (r) { return r.operatorName; } },
+      { k: 'nov', l: 'Novedad', t: function (r) { return novText({ t: r.nov.t, sub: r.nov.sub, stop: 0 }); }, h: function (r) { return '<span class="pill ' + (r.nov.t === 'averia' ? 'crit' : 'warn') + '">' + esc(novText({ t: r.nov.t, sub: r.nov.sub, stop: 0 })) + '</span>'; } },
+      { k: 'stop', l: 'H parada', n: 1, t: function (r) { return r.nov.stop || 0; }, f: function (v) { return v ? fmt(v) : '—'; }, b: 1 },
+      { k: 'notes', l: 'Detalle', t: function (r) { return r.notes || ''; }, h: function (r) { return '<span class="small">' + esc(r.notes || '') + '</span>'; } }
+    ];
+    rows = reps.filter(function (r) { return r.nov && (e.tipo === 'all' || r.nov.t === e.tipo) && (!q || (r.machineCode + ' ' + r.operatorName + ' ' + (r.notes || '')).toLowerCase().indexOf(q) > -1); }).map(function (r) { return Object.assign({ key: r.id }, r); });
+  }
+  return { cols: cols, rows: rows };
+}
+function exSorted(b) {
+  var e = S.ex, s = e.sort[e.mode], col = b.cols.filter(function (c) { return c.k === s[0]; })[0] || b.cols[0], d = s[1];
+  return b.rows.slice().sort(function (x, y) { var a = col.t(x), c = col.t(y), r = typeof a === 'number' ? a - c : String(a).localeCompare(String(c), 'es', { numeric: true }); return r * d; });
+}
+function repMini(list, withCode) {
+  if (!list.length) return '<p class="muted small" style="margin:0">Sin informes en este período.</p>';
+  return '<div class="xrep">' + list.slice().sort(function (a, b) { return b.date.localeCompare(a.date); }).slice(0, 12).map(function (r) {
+    var rl = repLines(r), chips = rl.map(function (l) { return '<span class="pill">' + esc(l.text) + (rl.length > 1 ? ' · ' + fmt(l.h) : '') + '</span>'; }).join('');
+    return '<div class="xr1"><span>' + esc(dmy(r.date)) + '</span><span>' + esc(r.operatorName) + (withCode && r.machineCode ? ' <span class="mono muted">' + esc(r.machineCode) + '</span>' : '') + '</span><span class="mono">' + (r.hours > 0 ? fmt(r.hours) + ' h' : '—') + '</span><span class="chips">' + chips + (r.nov ? '<span class="pill ' + (r.nov.t === 'averia' ? 'crit' : 'warn') + '">' + esc(novText(r.nov)) + '</span>' : '') + '</span><span class="mono">' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L' : '') + '</span></div>';
+  }).join('') + '</div>';
+}
+function exDetail(row) {
+  var e = S.ex;
+  if (e.mode === 'maq' || e.mode === 'op') return '<div class="muted small" style="margin-bottom:6px"><b>' + esc(e.mode === 'maq' ? row.m.code : row.name) + '</b> · últimos informes</div>' + repMini(row.reps, e.mode === 'op');
+  var ms = {}; row.en.forEach(function (x) { var o = ms[x.r.machineId] || (ms[x.r.machineId] = { code: x.r.machineCode, h: 0 }); o.h += x.l.h; });
+  var top = Object.keys(ms).map(function (k) { return ms[k]; }).sort(function (a, b) { return b.h - a.h; }).map(function (o) { return '<span class="pill">' + esc(o.code) + ' · ' + fmt(o.h) + ' h</span>'; }).join('');
+  var lst = row.en.slice().sort(function (a, b) { return b.r.date.localeCompare(a.r.date); }).slice(0, 12).map(function (x) { return '<div class="xr1 i"><span>' + esc(dmy(x.r.date)) + '</span><span>' + esc(x.r.operatorName) + ' <span class="mono muted">' + esc(x.r.machineCode) + '</span></span><span class="mono">' + fmt(x.l.h) + ' h</span><span class="small">' + esc(x.l.text) + '</span></div>'; }).join('');
+  return '<div class="muted small" style="margin-bottom:6px"><b>' + esc(row.label) + '</b> · horas por máquina</div><div class="chips" style="margin-bottom:10px">' + top + '</div><div class="xrep">' + lst + '</div>';
+}
+function exResults() {
+  var e = S.ex, b = exBuild(), rows = exSorted(b), tot = rows.length, shown = rows.slice(0, e.shown), s = e.sort[e.mode], nc = b.cols.length + (e.mode === 'av' ? 0 : 1);
+  var h = '<p class="muted small" style="margin:4px 0 10px">' + tot + ' ' + ({ maq: 'máquina', item: 'ítem', op: 'operador', av: 'novedad' }[e.mode]) + (tot === 1 ? '' : (e.mode === 'maq' || e.mode === 'op' ? 'es' : (e.mode === 'item' ? 's' : 'es'))) + (e.q.trim() ? ' que coinciden con “' + esc(e.q.trim()) + '”' : '') + (e.mode === 'av' ? '' : ' · tocá una fila para ver el detalle') + ' · tocá un título para ordenar</p>';
+  if (e.mode === 'av') {
+    var hp = 0, per = {}; rows.forEach(function (r) { hp += r.nov.stop || 0; per[r.machineCode] = (per[r.machineCode] || 0) + (r.nov.stop || 0); });
+    var worst = Object.keys(per).sort(function (a, c) { return per[c] - per[a]; })[0];
+    if (tot) h += '<div class="kpis" style="margin-bottom:14px"><div class="kpi"><span class="eyebrow">Novedades</span><span class="v">' + tot + '</span></div><div class="kpi"><span class="eyebrow">Horas de parada</span><span class="v">' + fmt(hp) + '<small>h</small></span></div><div class="kpi"><span class="eyebrow">Más paradas</span><span class="v">' + esc(worst || '—') + '</span></div></div>';
+  }
+  h += '<div class="tblw"><table class="ex"><thead><tr>' + b.cols.map(function (c) { return '<th class="' + (c.n ? 'n ' : '') + 'sortable" data-act="exsort" data-k="' + c.k + '">' + esc(c.l) + (s[0] === c.k ? (s[1] < 0 ? ' ↓' : ' ↑') : '') + '</th>'; }).join('') + (e.mode === 'av' ? '' : '<th></th>') + '</tr></thead><tbody>';
+  h += shown.map(function (r) {
+    var open = e.open === r.key && e.mode !== 'av';
+    var tr = '<tr' + (e.mode === 'av' ? '' : ' class="xrow' + (open ? ' open' : '') + '" data-act="exopen" data-k="' + esc(r.key) + '"') + '>' + b.cols.map(function (c) { var v = c.t(r); return '<td class="' + (c.n ? 'n' : '') + '">' + (c.h ? c.h(r) : (c.f ? (c.b ? '<b>' + c.f(v) + '</b>' : c.f(v)) : esc(v))) + '</td>'; }).join('') + (e.mode === 'av' ? '' : '<td class="car">' + (open ? '▾' : '▸') + '</td>') + '</tr>';
+    if (open) tr += '<tr class="xd"><td colspan="' + nc + '">' + exDetail(r) + '</td></tr>';
+    return tr;
+  }).join('') || '<tr><td colspan="' + nc + '" class="muted">No hay resultados con estos filtros.</td></tr>';
+  h += '</tbody></table></div><div class="exfoot"><span class="muted small">Mostrando ' + shown.length + ' de ' + tot + '</span><span style="display:flex;gap:8px">' + (tot > shown.length ? '<button class="btn sm" data-act="exmore">Mostrar más</button>' : '') + '<button class="btn sm" data-act="excsv">Descargar CSV</button></span></div>';
+  return h;
+}
+function exCsv() {
+  var b = exBuild(), rows = exSorted(b), e = S.ex;
+  var head = b.cols.map(function (c) { return c.l; });
+  var data = rows.map(function (r) { return b.cols.map(function (c) { var v = c.t(r); return typeof v === 'number' ? String(Math.round(v * 100) / 100).replace('.', ',') : v; }); });
+  downloadCsv([head].concat(data), 'explorar-' + e.mode + '-' + S.f.from + '_' + S.f.to + '.csv');
 }
 function stPill(r) { return r.status === 'validar' ? '<span class="pill warn">A revisar</span>' : '<span class="pill ok">Válido</span>'; }
 function informesView() {
   var rs = filt().slice().sort(function (a, b) { return b.date.localeCompare(a.date); }), lim = rs.slice(0, 150);
   var h = '<div class="sec" style="margin-top:0"><h2>Informes (' + rs.length + ')</h2><button class="btn sm" data-act="csv">Descargar CSV</button></div><div class="tblw"><table><thead><tr><th>Fecha</th><th>Máquina</th><th>Operador</th><th class="n">Horómetro</th><th class="n">Horas</th><th>Trabajos</th><th class="n">Combustible</th><th>Estado</th></tr></thead><tbody>';
   h += lim.map(function (r) {
-    var rl = repLines(r), chips = rl.map(function (l) { return '<span class="pill">' + esc(l.text) + (rl.length > 1 ? ' · ' + fmt(l.h) : '') + '</span>'; }).join('');
+    var rl = repLines(r), chips = rl.map(function (l) { return '<span class="pill">' + esc(l.text) + (rl.length > 1 ? ' · ' + fmt(l.h) : '') + '</span>'; }).join('') || '<span class="muted small">Sin trabajo</span>';
+    var nv = r.nov ? '<div style="margin-top:4px"><span class="pill ' + (r.nov.t === 'averia' ? 'crit' : 'warn') + '">' + esc(novText(r.nov)) + '</span></div>' : '';
     var ex = r.status === 'validar' ? '<div class="small" style="color:var(--warn);margin-top:4px">' + esc((r.flags || []).join('; ')) + '</div>' + (r.notes ? '<div class="small muted">' + esc(r.notes) + '</div>' : '') + '<button class="btn sm" style="margin-top:6px" data-act="valid" data-id="' + esc(r.id) + '">Dar por válido</button>' : (r.notes ? '<div class="small muted" style="margin-top:4px">' + esc(r.notes) + '</div>' : '');
-    return '<tr><td style="white-space:nowrap">' + esc(dmy(r.date)) + '</td><td><b>' + esc(r.machineCode) + '</b></td><td>' + esc(r.operatorName) + '</td><td class="n">' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + '</td><td class="n">' + fmt(r.hours) + '</td><td><div class="chips">' + chips + '</div></td><td class="n">' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L' : '—') + '</td><td>' + stPill(r) + ex + '</td></tr>';
+    return '<tr><td style="white-space:nowrap">' + esc(dmy(r.date)) + '<div class="muted small mono">' + esc(comprobante(r.id)) + '</div></td><td><b>' + esc(r.machineCode) + '</b></td><td>' + esc(r.operatorName) + '</td><td class="n">' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + '</td><td class="n">' + fmt(r.hours) + '</td><td><div class="chips">' + chips + '</div>' + nv + '</td><td class="n">' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L' : '—') + '</td><td>' + stPill(r) + ex + '</td></tr>';
   }).join('') || '<tr><td colspan="8" class="muted">No hay informes en este período.</td></tr>';
   return h + '</tbody></table></div>' + (rs.length > 150 ? '<p class="muted small">Se muestran los 150 más recientes. El CSV incluye todos.</p>' : '');
 }
@@ -572,24 +887,37 @@ function solicitudesView() {
   h += '<div class="sec"><h2>Historial</h2></div><div class="tblw"><table><thead><tr><th>Fecha</th><th>Operador</th><th>Máquina</th><th>Estado</th></tr></thead><tbody>' + (d.map(function (r) { return '<tr><td>' + esc(dmy(r.date)) + '</td><td>' + esc(r.operatorName) + '</td><td><b>' + esc(r.machineCode) + '</b></td><td><span class="pill ' + (r.status === 'aprobada' ? 'ok' : 'crit') + '">' + (r.status === 'aprobada' ? 'Aprobada' : 'Rechazada') + '</span></td></tr>'; }).join('') || '<tr><td colspan="4" class="muted">Todavía no hay solicitudes resueltas.</td></tr>') + '</tbody></table></div><p class="muted small" style="margin-top:10px">Una autorización vale solo para el día del pedido.</p>';
   return h;
 }
-function csvExport() {
+function downloadCsv(rows, name) {
   var q = function (v) { v = String(v == null ? '' : v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-  var rows = [['Fecha', 'Máquina', 'Operador', 'Horómetro inicial', 'Horómetro final', 'Horas', 'Trabajos', 'Combustible', 'Litros', 'Horómetro de carga', 'Estado', 'Observaciones']];
-  filt().slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (r) { rows.push([r.date, r.machineCode, r.operatorName, String(r.hIni).replace('.', ','), String(r.hFin).replace('.', ','), String(r.hours).replace('.', ','), repLines(r).map(function (l) { return l.text + ': ' + l.h; }).join(' | '), r.fuel ? r.fuel.type : '', r.fuel ? String(r.fuel.liters).replace('.', ',') : '', r.fuel ? String(r.fuel.horo).replace('.', ',') : '', r.status === 'validar' ? 'A revisar' : 'Válido', r.notes || '']); });
-  var blob = new Blob(['﻿' + rows.map(function (r) { return r.map(q).join(';'); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'informes-maquinaria-' + S.f.from + '_' + S.f.to + '.csv';
+  var blob = new Blob(['\ufeff' + rows.map(function (r) { return r.map(q).join(';'); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function csvExport() {
+  var rows = [['Fecha', 'Máquina', 'Operador', 'Horómetro inicial', 'Horómetro final', 'Horas', 'Trabajos', 'Combustible', 'Litros', 'Horómetro de carga', 'Novedad', 'Horas de parada', 'Estado', 'Observaciones', 'Comprobante']];
+  filt().slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (r) { rows.push([r.date, r.machineCode, r.operatorName, String(r.hIni).replace('.', ','), String(r.hFin).replace('.', ','), String(r.hours).replace('.', ','), repLines(r).map(function (l) { return l.text + ': ' + l.h; }).join(' | '), r.fuel ? r.fuel.type : '', r.fuel ? String(r.fuel.liters).replace('.', ',') : '', r.fuel ? String(r.fuel.horo).replace('.', ',') : '', r.nov ? novText({ t: r.nov.t, sub: r.nov.sub, stop: 0 }) : '', r.nov ? String(r.nov.stop || 0).replace('.', ',') : '', r.status === 'validar' ? 'A revisar' : 'Válido', r.notes || '', comprobante(r.id)]); });
+  downloadCsv(rows, 'informes-maquinaria-' + S.f.from + '_' + S.f.to + '.csv');
 }
 
 /* ---------- acciones ---------- */
+function exSet(mode) { var e = S.ex; e.mode = mode; e.q = ''; e.tipo = 'all'; e.open = null; e.shown = 15; render(); }
+function exRefresh() { var el = document.getElementById('exres'); if (el) el.innerHTML = exResults(); }
 function rework() { var el = document.getElementById('wblk'); if (el) el.innerHTML = worksHTML(); liveUpdate(); }
 var act = {
   role: function (d) { S.login = newLogin(d.r); render(); },
   key: function (d) { keyPress(d.k); },
   docGo: docDone,
   back: function () { var L = S.login; if (L.busy) return; S.login = newLogin('op'); S.pendingSession = null; render(); },
-  logout: function () { S.session = null; S.pendingSession = null; S.sup = null; S.f = null; save(); S.login = newLogin('op'); go('login'); refreshBootstrap(); },
+  logout: function () { S.hist.list = []; S.hist.opId = ''; S.hist.open = null; S.session = null; S.pendingSession = null; S.sup = null; S.f = null; save(); S.login = newLogin('op'); go('login'); refreshBootstrap(); },
   home: function () { go('opHome'); },
+  hist: function () { S.hist.open = null; S.hist.shown = 20; S.hist.err = ''; go('hist'); loadHist(); },
+  hlist: function () { S.hist.open = null; go('hist'); },
+  hopen: function (d) { S.hist.open = d.id; go('hist'); },
+  hrange: function (d) { S.hist.range = d.v; S.hist.shown = 20; render(); },
+  hmore: function () { S.hist.shown += 20; render(); },
+  share: function (d) { shareReport(d.id); },
+  nov: function (d) { var N = S.form.nov; N.t = d.v; if (d.v !== 'averia') N.sub = ''; if (!d.v) N.stop = ''; var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); liveUpdate(); },
+  novsub: function (d) { S.form.nov.sub = d.v; var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); },
   syncnow: function () { toast('Enviando…'); syncNow(); },
   discard: function (d) { S.failed = S.failed.filter(function (f) { return f.r.id !== d.id; }); save(); render(); },
   otra: function () { S.reqPick = null; S.reqNote = ''; go('otra'); },
@@ -619,6 +947,14 @@ var act = {
   refresh: loadSup,
   range: function (d) { var t = today(), n = +d.d; S.f.to = t; S.f.from = n ? addDays(t, -(n - 1)) : t.slice(0, 8) + '01'; loadSup(); },
   csv: csvExport,
+  miss: function () { S.showMiss = !S.showMiss; render(); },
+  goav: function () { S.tab = 'explorar'; exSet('av'); },
+  goex: function (d) { S.tab = 'explorar'; exSet(d.m); },
+  exmode: function (d) { exSet(d.m); },
+  exopen: function (d) { S.ex.open = S.ex.open === d.k ? null : d.k; exRefresh(); },
+  exsort: function (d) { var s = S.ex.sort[S.ex.mode]; if (s[0] === d.k) s[1] = -s[1]; else { s[0] = d.k; s[1] = /^(label|code|name|mach|inf|op|notes|date)$/.test(d.k) && d.k !== 'date' ? 1 : -1; } exRefresh(); },
+  exmore: function () { S.ex.shown += 15; exRefresh(); },
+  excsv: exCsv,
   valid: function (d) { api('supValidate', { pin: S.session.pinH, id: d.id }).then(function () { S.sup.reports.forEach(function (r) { if (r.id === d.id) r.status = 'ok'; }); render(); }).catch(supFail); },
   decide: function (d) { api('supRequest', { pin: S.session.pinH, id: d.id, status: d.v }).then(function () { S.sup.requests.forEach(function (r) { if (r.id === d.id) r.status = d.v; }); render(); }).catch(supFail); }
 };
@@ -629,11 +965,14 @@ var inp = {
   hrs: function (v, el) { S.form.hrs[el.dataset.k] = v; S.form.hrsEdited = true; liveUpdate(); },
   liters: function (v) { S.form.liters = v; }, fhoro: function (v) { S.form.fhoro = v; }, notes: function (v) { S.form.notes = v; },
   reqNote: function (v) { S.reqNote = v; },
+  exq: function (v) { S.ex.q = v; S.ex.shown = 15; S.ex.open = null; exRefresh(); },
+  nstop: function (v) { S.form.nov.stop = v; liveUpdate(); },
   pa: function (v, el) { var p = S.form.prog[el.dataset.k] || (S.form.prog[el.dataset.k] = {}); p.a = v; },
   pb: function (v, el) { var p = S.form.prog[el.dataset.k] || (S.form.prog[el.dataset.k] = {}); p.b = v; }
 };
 var onchange = {
-  ffrom: function (v) { if (v) { S.f.from = v; loadSup(); } }, fto: function (v) { if (v) { S.f.to = v; loadSup(); } }, fm: function (v) { S.f.machine = v; render(); }
+  ffrom: function (v) { if (v) { S.f.from = v; loadSup(); } }, fto: function (v) { if (v) { S.f.to = v; loadSup(); } }, fm: function (v) { S.f.machine = v; render(); },
+  exinf: function (v) { S.ex.inf = v; S.ex.shown = 15; S.ex.open = null; render(); }, extipo: function (v) { S.ex.tipo = v; S.ex.shown = 15; S.ex.open = null; render(); }
 };
 function onClick(e) { var b = e.target.closest('[data-act]'); if (!b || b.disabled) return; var f = act[b.dataset.act]; if (f) f(b.dataset, b, e); }
 app.addEventListener('click', onClick);
