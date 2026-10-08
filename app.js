@@ -4,24 +4,29 @@ var CFG = window.APP_CONFIG || {};
 var SAL = ':ied1';
 var ITEMS = [['limpieza','Limpieza y desbroce'],['destape','Destape de cantera'],['bolsones','Exc. de bolsones'],['exc_nc','Exc. no clasificada'],['zanja','Exc. zanja de drenaje'],['carga_prest','Carga de mat. en préstamo'],['carga_cant','Carga de mat. en cantera'],['carga_plant','Carga de mat. en plantas'],['limp_prest','Limpieza p/ préstamo'],['acopio','Trabajo en acopio'],['cantera','Trabajo en cantera'],['esp_terr','Esparcida de mat. (terraplén)'],['esp_bolson','Esparcida de mat. (exc. bolsón)'],['esp_nc','Esparcida de mat. (exc. no clasif.)'],['taludes','Arreglo de taludes'],['cachamba','Limpieza de cachamba'],['otros','Otros']];
 var ITEM_N = {}; ITEMS.forEach(function (i) { ITEM_N[i[0]] = i[1]; });
-var app = document.getElementById('app'), toastEl = document.getElementById('toast');
+var app = document.getElementById('app'), topEl = document.getElementById('top'), toastEl = document.getElementById('toast');
 var LS = 'ied.v1', toastT = null, renderT = null, pending = false, installEv = null;
 
 var saved = (function () { try { return JSON.parse(localStorage.getItem(LS) || 'null') || {}; } catch (e) { return {}; } })();
+// solo se conservan los operadores que ya entraron en este celular (no hay lista completa)
+var knownDocs = saved.known || {};
+var keepOps = {}; Object.keys(knownDocs).forEach(function (k) { keepOps[knownDocs[k]] = 1; }); if (saved.session && saved.session.opId) keepOps[saved.session.opId] = 1;
+var localOps = {}; Object.keys(saved.operators || {}).forEach(function (id) { if (keepOps[id]) localOps[id] = saved.operators[id]; });
+function newLogin(role) { return { role: role || 'op', step: 'doc', doc: '', opId: null, pin: '', first: null, err: '', busy: false }; }
 var S = {
-  machines: saved.machines || {}, operators: saved.operators || {}, shift: saved.shift || 9, myReqs: saved.myReqs || [], myReqsDate: saved.myReqsDate || '',
+  machines: saved.machines || {}, operators: localOps, known: knownDocs, shift: saved.shift || 9, myReqs: saved.myReqs || [], myReqsDate: saved.myReqsDate || '',
   queue: saved.queue || [], failed: saved.failed || [], session: null, pendingSession: null, view: 'login', tab: 'panel',
-  login: { role: 'op', opId: null, pin: '', first: null, err: '', busy: false }, form: null, last: null, f: null, sup: null, supLoading: false,
+  login: newLogin('op'), form: null, last: null, f: null, sup: null, supLoading: false,
   reqPick: null, reqNote: '', boot: 'wait', net: { syncing: false, lastErr: '' }
 };
 if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
-  if (CFG.REQUIRE_PIN_ON_OPEN) { S.pendingSession = saved.session; S.login.opId = saved.session.opId; }
+  if (CFG.REQUIRE_PIN_ON_OPEN) { S.pendingSession = saved.session; S.login.opId = saved.session.opId; S.login.step = 'pin'; }
   else { S.session = saved.session; S.view = 'opHome'; }
 }
 
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, operators: S.operators, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed }));
+    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed }));
   } catch (e) {}
 }
 
@@ -31,6 +36,9 @@ function fmt(n, d) { if (d == null) d = 1; return Number(n).toLocaleString('es-P
 function gs(n) { return '₲ ' + Math.round(n).toLocaleString('es-PY'); }
 function r1(n) { return Math.round(n * 10) / 10; }
 function parseNum(v) { v = String(v == null ? '' : v).trim().replace(/\s/g, ''); if (!v) return NaN; var c = v.indexOf(','), d = v.indexOf('.'); if (c > -1 && d > -1) v = v.replace(/\./g, '').replace(',', '.'); else if (c > -1) v = v.replace(',', '.'); return parseFloat(v); }
+function dfull(s) { var p = s.split('-'), t = new Date(+p[0], +p[1] - 1, +p[2]).toLocaleDateString('es-PY', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1); }
+function normDoc(v) { return String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, ''); }
+function fmtDoc(v) { return /^\d+$/.test(v) ? v.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : v; }
 function today() { return new Date().toLocaleDateString('sv-SE'); }
 function addDays(s, n) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2] + n).toLocaleDateString('sv-SE'); }
 function dmy(s) { var p = s.split('-'); return p[2] + '/' + p[1]; }
@@ -47,10 +55,28 @@ function sha(s) {
     return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
   });
 }
+/* íconos por tipo de máquina (dibujo simple; body = color principal, acc = rojo, hole = contraste) */
+function mKind(m) {
+  var t = (String(m && m.type || '') + ' ' + String(m && m.code || '')).toLowerCase();
+  if (/motonivel|\bmn-/.test(t)) return 'mn'; if (/exc|\bex-/.test(t)) return 'ex'; if (/top|\btp-/.test(t)) return 'tp';
+  if (/tractor|\bta-/.test(t)) return 'ta'; if (/vibro|compact|\bvc-/.test(t)) return 'vc'; return 'gen';
+}
+var ICON = {
+  ex: '<rect x="6" y="46" width="60" height="13" rx="6.5" fill="B"/><circle cx="14" cy="52.5" r="3.2" fill="H"/><circle cx="37" cy="52.5" r="3.2" fill="H"/><circle cx="58" cy="52.5" r="3.2" fill="H"/><rect x="14" y="31" width="42" height="14" rx="3" fill="B"/><path d="M18 31V19a2 2 0 0 1 2-2h14l8 14z" fill="A"/><path d="M23 29V21h9l5 8z" fill="H" opacity=".5"/><path d="M46 35L66 11l8 5" stroke="B" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 14l10 22" stroke="B" stroke-width="4" stroke-linecap="round"/><path d="M77 34h13l-3 13h-10z" fill="A"/>',
+  tp: '<rect x="10" y="45" width="66" height="14" rx="7" fill="B"/><circle cx="19" cy="52" r="3.4" fill="H"/><circle cx="43" cy="52" r="3.4" fill="H"/><circle cx="67" cy="52" r="3.4" fill="H"/><rect x="22" y="31" width="46" height="14" rx="3" fill="B"/><path d="M30 31V16a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v15z" fill="A"/><path d="M34 28V19h12v9z" fill="H" opacity=".5"/><rect x="14" y="10" width="3" height="8" fill="B"/><path d="M68 44l16 4" stroke="B" stroke-width="4" stroke-linecap="round"/><path d="M84 28h6l2 28h-6z" fill="A"/>',
+  mn: '<path d="M10 40h60" stroke="B" stroke-width="5" stroke-linecap="round"/><rect x="52" y="34" width="34" height="10" rx="3" fill="B"/><path d="M56 34V17a2 2 0 0 1 2-2h18a2 2 0 0 1 2 2v17z" fill="A"/><path d="M61 31V20h12v11z" fill="H" opacity=".5"/><circle cx="16" cy="48" r="10" fill="B"/><circle cx="16" cy="48" r="4" fill="H"/><circle cx="62" cy="50" r="9" fill="B"/><circle cx="62" cy="50" r="3.5" fill="H"/><circle cx="80" cy="50" r="9" fill="B"/><circle cx="80" cy="50" r="3.5" fill="H"/><path d="M34 42l4 10" stroke="B" stroke-width="3.5" stroke-linecap="round"/><rect x="26" y="52" width="26" height="5" rx="2" fill="A"/>',
+  ta: '<path d="M44 34h34a3 3 0 0 1 3 3v9H44z" fill="B"/><path d="M26 34V17a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v17z" fill="A"/><path d="M30 31V20h10v11z" fill="H" opacity=".5"/><rect x="22" y="31" width="30" height="8" rx="2" fill="B"/><rect x="74" y="20" width="3" height="14" fill="B"/><circle cx="30" cy="46" r="16" fill="B"/><circle cx="30" cy="46" r="7" fill="H"/><circle cx="30" cy="46" r="3" fill="A"/><circle cx="74" cy="52" r="9" fill="B"/><circle cx="74" cy="52" r="3.5" fill="H"/>',
+  vc: '<rect x="30" y="31" width="52" height="15" rx="3" fill="B"/><path d="M48 31V15a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v16z" fill="A"/><path d="M53 28V18h10v10z" fill="H" opacity=".5"/><circle cx="22" cy="46" r="15" fill="B"/><circle cx="22" cy="46" r="6" fill="H"/><path d="M12 38l20 16M10 46h24M12 54l20-16" stroke="H" stroke-width="1.6" opacity=".5"/><circle cx="72" cy="52" r="9" fill="B"/><circle cx="72" cy="52" r="3.5" fill="H"/><path d="M32 40l-8 6" stroke="B" stroke-width="4" stroke-linecap="round"/>',
+  gen: '<circle cx="48" cy="34" r="22" fill="A"/><circle cx="48" cy="34" r="14" fill="B"/><circle cx="48" cy="34" r="5" fill="H"/>'
+};
+function mIcon(m, dark, w) {
+  var body = dark ? '#ffffff' : '#0e0e0e', hole = dark ? '#0e0e0e' : '#ffffff', g = ICON[mKind(m)].replace(/"B"/g, '"' + body + '"').replace(/"H"/g, '"' + hole + '"').replace(/"A"/g, '"#d31f16"');
+  return '<svg class="micon" width="' + w + '" height="' + Math.round(w * 2 / 3) + '" viewBox="0 0 96 64" aria-hidden="true">' + g + '</svg>';
+}
 var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
   bad_pin: 'PIN incorrecto', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
-  unknown_operator: 'Ese operador no está habilitado.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
+  unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
   bad_date: 'Fecha inválida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
 };
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
@@ -70,13 +96,11 @@ function applyMachines(list) {
   S.machines = o;
 }
 function applyBootstrap(res) {
-  applyMachines(res.machines);
-  var ops = {}; res.operators.forEach(function (o) { ops[o.id] = o; });
-  S.operators = ops; S.shift = res.shiftHours || 9;
+  applyMachines(res.machines); S.shift = res.shiftHours || 9;
 }
 function applySync(res) {
   applyMachines(res.machines); S.myReqs = res.requests || []; S.myReqsDate = res.serverDate || today();
-  var o = S.operators[res.operator.id]; if (o) { o.machineId = res.operator.machineId; o.hasPin = true; }
+  var o = S.operators[res.operator.id]; if (o) { o.machineId = res.operator.machineId; o.name = res.operator.name || o.name; o.hasPin = true; }
 }
 function refreshBootstrap() {
   return api('bootstrap').then(function (res) { applyBootstrap(res); S.boot = 'ok'; save(); soft(); })
@@ -107,8 +131,8 @@ function syncNow() {
 function authLost(e) {
   var id = S.session && S.session.opId;
   S.session = null; S.pendingSession = null; save();
-  S.login = { role: 'op', opId: null, pin: '', first: null, err: e && e.error === 'bad_pin' ? 'Tu PIN cambió. Entrá de nuevo.' : errMsg(e), busy: false };
-  S.view = 'login'; if (id && S.operators[id]) S.login.opId = id;
+  S.login = newLogin('op'); S.login.err = e && e.error === 'bad_pin' ? 'Tu PIN cambió. Entrá de nuevo.' : errMsg(e);
+  S.view = 'login'; if (id && S.operators[id]) { S.login.opId = id; S.login.step = 'pin'; }
 }
 
 /* ---------- pantallas ---------- */
@@ -122,10 +146,10 @@ function header() {
   var who = '';
   if (S.session && S.session.role === 'op') { var o = S.operators[S.session.opId]; who = '<div class="who">' + netPill() + '<b>' + esc(o ? o.name : '') + '</b><button class="link" data-act="logout">Salir</button></div>'; }
   if (S.session && S.session.role === 'sup') who = '<div class="who"><b>Supervisor</b><button class="link" data-act="logout">Salir</button></div>';
-  return '<header class="top"><div class="brand"><span class="mark">Hs</span><span>Informe diario de equipos</span></div>' + who + '</header>';
+  return '<div class="topin"><img class="logo" src="icons/logo.png" alt="WheelCo">' + who + '</div>';
 }
 function render() {
-  app.className = 'wrap' + (S.view === 'sup' ? ' wide' : '');
+  app.className = 'wrap' + (S.view === 'sup' ? ' wide' : ''); topEl.className = S.view === 'sup' ? 'wide' : '';
   var body = '';
   if (!CFG.API_URL || !CFG.API_KEY) body = '<div class="callout warn">La app todavía no está conectada a la planilla. Falta completar el archivo config.js (ver la guía de instalación).</div>';
   else if (S.view === 'login') body = loginView();
@@ -134,7 +158,7 @@ function render() {
   else if (S.view === 'otra') body = otraView();
   else if (S.view === 'done') body = doneView();
   else if (S.view === 'sup') body = supView();
-  app.innerHTML = header() + body;
+  topEl.innerHTML = header(); app.innerHTML = body;
   if (S.view === 'form') liveUpdate();
 }
 function go(v) { S.view = v; window.scrollTo(0, 0); render(); }
@@ -151,41 +175,63 @@ function soft() {
 app.addEventListener('focusout', function () { if (pending) { pending = false; setTimeout(function () { if (S.view !== 'form') render(); }, 60); } });
 
 /* login */
+function padHTML(extra) {
+  var h = '<div class="pad' + (S.login.busy ? ' loading' : '') + '">';
+  '123456789'.split('').forEach(function (n) { h += '<button data-act="key" data-k="' + n + '">' + n + '</button>'; });
+  return h + extra + '</div>';
+}
 function loginView() {
   var L = S.login, h = '<div class="stack">';
-  if (!L.opId || L.role === 'sup') h += '<div class="tabs2"><button data-act="role" data-r="op" aria-pressed="' + (L.role === 'op') + '">Soy operador</button><button data-act="role" data-r="sup" aria-pressed="' + (L.role === 'sup') + '">Supervisor</button></div>';
-  if (L.role === 'op' && !L.opId) {
-    var ops = operators();
-    h += '<h1 class="big">¿Quién sos?</h1>';
-    if (L.err) h += '<div class="err">' + esc(L.err) + '</div>';
-    if (!ops.length && S.boot === 'wait') h += '<p class="muted">Cargando operadores…</p>';
-    else if (!ops.length && S.boot === 'offline') h += '<div class="callout warn">Necesitás señal para abrir la app por primera vez en este celular.</div><button class="btn" data-act="retry">Reintentar</button>';
-    else if (!ops.length && S.boot !== 'ok') h += '<div class="callout">No se pudo cargar la lista (' + esc(ERR[S.boot] || S.boot) + ').</div><button class="btn" data-act="retry">Reintentar</button>';
-    else if (!ops.length) h += '<p class="muted">Todavía no hay operadores cargados. Pedile al supervisor que te agregue en la planilla.</p>';
-    else h += '<div class="oplist">' + ops.map(function (o) { return '<button class="opbtn" data-act="pickOp" data-id="' + esc(o.id) + '"><span>' + esc(o.name) + '</span><span class="pill mono">' + esc(o.machineId ? mcode(o.machineId) : 'sin máquina') + '</span></button>'; }).join('') + '</div>';
+  if ((L.role === 'op' && L.step === 'doc') || L.role === 'sup') h += '<div class="tabs2"><button data-act="role" data-r="op" aria-pressed="' + (L.role === 'op') + '">Soy operador</button><button data-act="role" data-r="sup" aria-pressed="' + (L.role === 'sup') + '">Supervisor</button></div>';
+  if (L.role === 'op' && L.step === 'doc') {
+    h += '<div><h1 class="big">Ingresá tu número de documento</h1><p class="muted" style="margin:6px 0 0">Tu cédula, solo los números.</p></div>';
+    h += '<div class="docbox" aria-live="polite">' + (L.doc ? esc(fmtDoc(L.doc)) : '<span class="muted">Tu número de cédula</span>') + '</div>';
+    h += '<div class="err">' + (L.busy ? '<span class="muted">Buscando…</span>' : esc(L.err)) + '</div>';
+    h += padHTML('<span></span><button data-act="key" data-k="0">0</button><button data-act="key" data-k="del" aria-label="Borrar">⌫</button>');
+    h += '<button class="btn primary" data-act="docGo"' + (L.doc.length < 4 || L.busy ? ' disabled' : '') + '>Continuar</button>';
     if (installEv) h += '<button class="link" data-act="install" style="align-self:center">Instalar la app en este celular</button>';
   } else {
     var title, sub = '';
     if (L.role === 'sup') title = 'PIN de supervisor';
     else {
       var op = S.operators[L.opId];
-      if (!op.hasPin && !(S.pendingSession && S.pendingSession.opId === op.id)) { title = L.first ? 'Repetí tu PIN' : 'Creá tu PIN'; sub = 'Elegí 4 números que recuerdes. Lo vas a usar siempre para entrar.'; }
+      if (!op) { L.step = 'doc'; L.opId = null; return loginView(); }
+      if (!op.hasPin && !(S.pendingSession && S.pendingSession.opId === op.id)) { title = L.first ? 'Repetí tu PIN' : 'Creá tu PIN'; sub = op.name + '. Elegí 4 números que recuerdes. Lo vas a usar siempre para entrar.'; }
       else { title = 'Hola, ' + op.name.split(' ')[0]; sub = 'Ingresá tu PIN.'; }
     }
     var d = ''; for (var i = 0; i < 4; i++) d += '<i class="' + (i < L.pin.length ? 'on' : '') + '"></i>';
     h += '<div style="text-align:center"><h1 class="big">' + esc(title) + '</h1>' + (sub ? '<p class="muted" style="margin:6px 0 0">' + esc(sub) + '</p>' : '') + '</div>';
-    h += '<div class="dots" aria-label="' + L.pin.length + ' de 4 dígitos">' + d + '</div><div class="err">' + (L.busy ? '<span class="muted">Verificando…</span>' : esc(L.err)) + '</div><div class="pad' + (L.busy ? ' loading' : '') + '">';
-    '123456789'.split('').forEach(function (n) { h += '<button data-act="key" data-k="' + n + '">' + n + '</button>'; });
-    h += '<button data-act="back" aria-label="Volver" style="font-size:1rem;font-family:var(--f-body)">Volver</button><button data-act="key" data-k="0">0</button><button data-act="key" data-k="del" aria-label="Borrar">⌫</button></div>';
+    h += '<div class="dots" aria-label="' + L.pin.length + ' de 4 dígitos">' + d + '</div><div class="err">' + (L.busy ? '<span class="muted">Verificando…</span>' : esc(L.err)) + '</div>';
+    h += padHTML('<button class="ghost" data-act="back" aria-label="Volver">' + (L.role === 'op' ? 'No soy yo' : 'Volver') + '</button><button data-act="key" data-k="0">0</button><button data-act="key" data-k="del" aria-label="Borrar">⌫</button>');
   }
   return h + '</div>';
 }
 function keyPress(k) {
   var L = S.login; if (L.busy) return; L.err = '';
+  if (L.role === 'op' && L.step === 'doc') { if (k === 'del') L.doc = L.doc.slice(0, -1); else if (L.doc.length < 12) L.doc += k; render(); return; }
   if (k === 'del') L.pin = L.pin.slice(0, -1); else if (L.pin.length < 4) L.pin += k;
   render(); if (L.pin.length === 4) setTimeout(pinDone, 140);
 }
 function loginFail(msg) { var L = S.login; L.busy = false; L.err = msg; L.pin = ''; render(); }
+function docDone() {
+  var L = S.login, doc = normDoc(L.doc); if (L.busy || doc.length < 4) return;
+  L.busy = true; L.err = ''; render();
+  api('identify', { doc: doc }).then(function (res) {
+    applyMachines(res.machines); S.shift = res.shiftHours || 9;
+    var op = res.operator, old = S.operators[op.id] || {};
+    S.operators[op.id] = Object.assign({}, old, { id: op.id, name: op.name, machineId: op.machineId, hasPin: op.hasPin });
+    S.known[doc] = op.id; save();
+    L.opId = op.id; L.step = 'pin'; L.pin = ''; L.first = null; L.busy = false; render();
+  }).catch(function (e) {
+    L.busy = false;
+    if (e && e.offline) {
+      var id = S.known[doc];
+      if (id && S.operators[id]) { L.opId = id; L.step = 'pin'; L.pin = ''; L.first = null; render(); return; }
+      L.err = 'Necesitás señal para entrar la primera vez en este celular.';
+    } else L.err = errMsg(e);
+    render();
+  });
+}
 function pinDone() {
   var L = S.login;
   if (L.role === 'sup') { supLogin(L.pin); return; }
@@ -198,7 +244,7 @@ function pinDone() {
       if (L.first !== L.pin) { L.first = null; loginFail('Los PIN no coinciden. Empezá de nuevo.'); return; }
       return api('setPin', { opId: op.id, newPin: h }).then(function () { op.hasPin = true; return api('sync', { opId: op.id, pin: h, reports: [] }); })
         .then(function (res) { applySync(res); enterAs(op.id, h); })
-        .catch(function (e) { L.first = null; if (e && e.error === 'pin_exists') { op.hasPin = true; refreshBootstrap(); } loginFail(errMsg(e) === 'Sin señal' ? 'Necesitás señal para crear tu PIN.' : errMsg(e)); });
+        .catch(function (e) { L.first = null; if (e && e.error === 'pin_exists') { op.hasPin = true; save(); } loginFail(errMsg(e) === 'Sin señal' ? 'Necesitás señal para crear tu PIN.' : errMsg(e)); });
     }
     return api('sync', { opId: op.id, pin: h, reports: [] }).then(function (res) { applySync(res); enterAs(op.id, h); })
       .catch(function (e) {
@@ -212,7 +258,7 @@ function pinDone() {
 }
 function enterAs(opId, h) {
   S.session = { role: 'op', opId: opId, pinH: h }; S.pendingSession = null; save();
-  S.login = { role: 'op', opId: null, pin: '', first: null, err: '', busy: false };
+  S.login = newLogin('op');
   go('opHome'); syncNow();
 }
 
@@ -221,10 +267,10 @@ function myReqs() { return S.myReqsDate === today() ? S.myReqs : []; }
 function opHome() {
   var op = S.operators[S.session.opId]; if (!op) return '<p>Cargando…</p>';
   var m = S.machines[op.machineId], q = mineQueue(), fl = mineFailed();
-  var h = '<div class="stack"><h1 class="big">Hola, ' + esc(op.name.split(' ')[0]) + '</h1>';
+  var h = '<div class="stack"><div><div class="muted">' + esc(dfull(today())) + '</div><h1 class="big">Hola, ' + esc(op.name.split(' ')[0]) + '</h1></div>';
   if (q.length) h += '<div class="callout warn">Tenés ' + q.length + ' informe' + (q.length > 1 ? 's' : '') + ' sin enviar. Se envían solos cuando haya señal. <button class="link" data-act="syncnow">Enviar ahora</button></div>';
   fl.forEach(function (f) { h += '<div class="callout">No se pudo enviar el informe del ' + esc(dlong(f.r.date)) + ' de ' + esc(mcode(f.r.machineId)) + ': ' + esc(ERR[f.error] || f.error) + '. Avisale a tu supervisor. <button class="link" data-act="discard" data-id="' + esc(f.r.id) + '">Descartar</button></div>'; });
-  if (m) h += '<div class="card"><div class="eyebrow">Tu máquina</div><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:4px"><div class="big" style="font-family:var(--f-display);font-weight:700">' + esc(m.code) + '</div><div class="muted" style="text-align:right">' + esc(m.name) + '</div></div><div class="small muted" style="margin-top:8px">Último horómetro: <span class="mono" style="color:var(--ink)">' + fmt(m.horo) + '</span></div></div><button class="btn primary" data-act="newForm" data-m="' + esc(m.id) + '">Cargar informe de hoy</button>';
+  if (m) h += '<div class="mcard"><div class="mrow"><span class="eyebrow">Tu máquina</span><span class="mtype">' + esc(m.name) + '</span></div><div class="mrow"><div class="mcode">' + esc(m.code) + '</div>' + mIcon(m, true, 128) + '</div><div class="horo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6a60" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M12 3v2"/></svg><span>Último horómetro</span><b>' + fmt(m.horo) + '</b></div></div><button class="btn primary" data-act="newForm" data-m="' + esc(m.id) + '">Cargar informe de hoy</button>';
   else h += '<div class="callout warn">No tenés una máquina asignada. Pedí autorización para la que vas a usar.</div>';
   myReqs().forEach(function (r) {
     if (r.status === 'aprobada') h += '<div class="card"><div class="eyebrow">Autorizada para hoy</div><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0 12px"><b class="mono" style="font-size:1.25rem">' + esc(r.machineCode) + '</b><span class="pill ok">Aprobada</span></div><button class="btn primary" data-act="newForm" data-m="' + esc(r.machineId) + '">Cargar informe con ' + esc(r.machineCode) + '</button></div>';
@@ -239,7 +285,7 @@ function opHome() {
 function otraView() {
   var op = S.operators[S.session.opId], h = '<div class="stack"><button class="link" data-act="home" style="align-self:flex-start">← Volver</button><h1 class="big">¿Qué máquina vas a usar?</h1><p class="muted" style="margin:0">Tu supervisor tiene que autorizarla antes de que puedas cargar horas en ella. Para pedirla necesitás señal.</p>';
   var ms = machines().filter(function (m) { return m.id !== op.machineId; });
-  h += '<div class="grid2">' + ms.map(function (m) { return '<button class="tg c" data-act="reqPick" data-m="' + esc(m.id) + '" aria-pressed="' + (S.reqPick === m.id) + '"><span class="mono">' + esc(m.code) + '</span></button>'; }).join('') + '</div>';
+  h += '<div class="grid2">' + ms.map(function (m) { return '<button class="mbtn" data-act="reqPick" data-m="' + esc(m.id) + '" aria-pressed="' + (S.reqPick === m.id) + '">' + mIcon(m, S.reqPick === m.id, 64) + '<span>' + esc(m.code) + '</span></button>'; }).join('') + '</div>';
   if (S.reqPick) { var m = S.machines[S.reqPick]; h += '<div class="card"><b>' + esc(m.name) + '</b><div class="muted small">' + esc(m.code) + '</div></div><label class="fld">Motivo (opcional)<textarea class="txt" id="reqNote" data-in="reqNote" placeholder="Ej: mi máquina está en taller">' + esc(S.reqNote) + '</textarea></label><button class="btn primary" data-act="reqSend"' + (S.busy ? ' disabled' : '') + '>Pedir autorización</button>'; }
   return h + '</div>';
 }
@@ -258,22 +304,22 @@ function allowed() {
 }
 function newForm(mid) {
   var m = S.machines[mid];
-  S.form = { machineId: mid, date: today(), hIni: String(m.horo), unlock: false, hFin: '', items: [], hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '' };
+  S.form = { machineId: mid, date: today(), hIni: String(m.horo).replace('.', ','), unlock: false, hFin: '', items: [], hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '' };
   go('form');
 }
 function formHTML() {
   var F = S.form, m = S.machines[F.machineId], al = allowed(), own = S.operators[S.session.opId].machineId;
-  var h = '<div class="stack" style="gap:0"><button class="link" data-act="home" style="align-self:flex-start">← Cancelar</button><h1 class="big" style="margin:6px 0 4px">Informe diario</h1>';
+  var h = '<div class="stack" style="gap:0"><button class="link" data-act="home" style="align-self:flex-start">← Cancelar</button><div class="mhead"><h1 class="big" style="font-size:1.875rem">Informe diario</h1>' + mIcon(m, false, 84) + '</div>';
   h += '<section class="blk"><h3><span>1</span>Máquina y fecha</h3>';
-  if (al.length > 1) h += '<div class="grid2">' + al.map(function (i) { return '<button class="tg c" data-act="fmach" data-m="' + esc(i) + '" aria-pressed="' + (i === F.machineId) + '"><span class="mono">' + esc(mcode(i)) + '</span></button>'; }).join('') + '</div>';
-  h += '<div class="card" style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><b class="big" style="font-family:var(--f-display);font-size:2rem">' + esc(m.code) + '</b><span class="muted">' + esc(m.name) + (F.machineId !== own ? ' · autorizada' : '') + '</span></div>';
+  if (al.length > 1) h += '<div class="grid2">' + al.map(function (i) { return '<button class="mbtn" data-act="fmach" data-m="' + esc(i) + '" aria-pressed="' + (i === F.machineId) + '">' + mIcon(S.machines[i], i === F.machineId, 64) + '<span>' + esc(mcode(i)) + '</span></button>'; }).join('') + '</div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:2rem">' + esc(m.code) + '</b><span class="muted">' + esc(m.name) + (F.machineId !== own ? ' · autorizada' : '') + '</span></div>';
   h += '<label class="fld">Fecha<input class="txt" type="date" id="f-date" data-in="date" value="' + esc(F.date) + '" max="' + today() + '"></label></section>';
   h += '<section class="blk"><h3><span>2</span>Horómetro</h3>';
   h += '<label class="fld">Inicial' + (F.unlock ? '' : ' <span class="muted" style="font-weight:400">(el último que se registró)</span>') + '<input class="num" id="f-hini" data-in="hIni" inputmode="decimal" autocomplete="off" value="' + esc(F.hIni) + '"' + (F.unlock ? '' : ' readonly') + '></label>';
   if (!F.unlock) h += '<button class="link" data-act="unlock" style="align-self:flex-start">El horómetro no marca ese número</button>';
   h += '<label class="fld">Final<input class="num" id="f-hfin" data-in="hFin" inputmode="decimal" autocomplete="off" placeholder="0000,0" value="' + esc(F.hFin) + '"></label>';
   h += '<div class="hbox" id="hbox"><span>Horas trabajadas</span><span class="mono" id="hval">—</span></div><div class="small" id="hmsg" style="min-height:1.2em"></div></section>';
-  h += '<section class="blk"><h3><span>3</span>Trabajos realizados</h3><p class="muted small" style="margin:0">Tocá todos los que hiciste.</p><div class="grid2">' + ITEMS.map(function (i) { return '<button class="tg" data-act="item" data-k="' + i[0] + '" aria-pressed="' + (F.items.indexOf(i[0]) > -1) + '">' + esc(i[1]) + '</button>'; }).join('') + '</div><div id="hrows">' + hrowsHTML() + '</div></section>';
+  h += '<section class="blk"><h3><span>3</span>Trabajos realizados</h3><p class="muted small" style="margin:0">Tocá todos los que hiciste.</p><div class="tgl">' + ITEMS.map(function (i) { return '<button class="tg" data-act="item" data-k="' + i[0] + '" aria-pressed="' + (F.items.indexOf(i[0]) > -1) + '">' + esc(i[1]) + '</button>'; }).join('') + '</div><div id="hrows">' + hrowsHTML() + '</div></section>';
   h += '<section class="blk"><h3><span>4</span>Combustible</h3><p class="muted small" style="margin:0">¿Cargaste combustible?</p><div class="grid2"><button class="tg c" data-act="fuel" data-v="no" aria-pressed="' + (F.fuel === false) + '">No</button><button class="tg c" data-act="fuel" data-v="si" aria-pressed="' + (F.fuel === true) + '">Sí</button></div>';
   h += '<div id="fuelf" class="stack tight"' + (F.fuel === true ? '' : ' hidden') + '><div class="grid2"><button class="tg c" data-act="ftype" data-v="Gasoil" aria-pressed="' + (F.ftype === 'Gasoil') + '">Gasoil</button><button class="tg c" data-act="ftype" data-v="Nafta" aria-pressed="' + (F.ftype === 'Nafta') + '">Nafta</button></div><label class="fld">Litros cargados<input class="num" id="f-lit" data-in="liters" inputmode="decimal" autocomplete="off" value="' + esc(F.liters) + '"></label><label class="fld">Horómetro al cargar<input class="num" id="f-fh" data-in="fhoro" inputmode="decimal" autocomplete="off" value="' + esc(F.fhoro) + '"></label></div></section>';
   h += '<section class="blk"><h3><span>5</span>Observaciones</h3><label class="fld"><span class="muted" style="font-weight:400">Si hubo avería, parada o algo para avisar (opcional)</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(F.notes) + '</textarea></label></section>';
@@ -459,12 +505,11 @@ function csvExport() {
 
 /* ---------- acciones ---------- */
 var act = {
-  role: function (d) { S.login = { role: d.r, opId: null, pin: '', first: null, err: '', busy: false }; render(); },
-  pickOp: function (d) { S.login.opId = d.id; S.login.pin = ''; S.login.first = null; S.login.err = ''; render(); },
+  role: function (d) { S.login = newLogin(d.r); render(); },
   key: function (d) { keyPress(d.k); },
-  back: function () { var L = S.login; if (L.busy) return; L.opId = null; L.pin = ''; L.first = null; L.err = ''; L.role = 'op'; S.pendingSession = null; render(); },
-  retry: function () { S.boot = 'wait'; render(); refreshBootstrap(); },
-  logout: function () { S.session = null; S.pendingSession = null; S.sup = null; S.f = null; save(); S.login = { role: 'op', opId: null, pin: '', first: null, err: '', busy: false }; go('login'); refreshBootstrap(); },
+  docGo: docDone,
+  back: function () { var L = S.login; if (L.busy) return; S.login = newLogin('op'); S.pendingSession = null; render(); },
+  logout: function () { S.session = null; S.pendingSession = null; S.sup = null; S.f = null; save(); S.login = newLogin('op'); go('login'); refreshBootstrap(); },
   home: function () { go('opHome'); },
   syncnow: function () { toast('Enviando…'); syncNow(); },
   discard: function (d) { S.failed = S.failed.filter(function (f) { return f.r.id !== d.id; }); save(); render(); },
@@ -472,7 +517,7 @@ var act = {
   reqPick: function (d) { S.reqPick = d.m; render(); },
   reqSend: reqSend,
   newForm: function (d) { newForm(d.m); },
-  fmach: function (d) { var m = S.machines[d.m]; S.form.machineId = d.m; S.form.hIni = String(m.horo); S.form.unlock = false; render(); },
+  fmach: function (d) { var m = S.machines[d.m]; S.form.machineId = d.m; S.form.hIni = String(m.horo).replace('.', ','); S.form.unlock = false; render(); },
   unlock: function () { S.form.unlock = true; render(); var i = document.getElementById('f-hini'); if (i) i.focus(); },
   item: function (d, b) {
     var F = S.form, i = F.items.indexOf(d.k); if (i > -1) { F.items.splice(i, 1); delete F.hrs[d.k]; } else F.items.push(d.k);
@@ -506,7 +551,9 @@ var inp = {
 var onchange = {
   ffrom: function (v) { if (v) { S.f.from = v; loadSup(); } }, fto: function (v) { if (v) { S.f.to = v; loadSup(); } }, fm: function (v) { S.f.machine = v; render(); }
 };
-app.addEventListener('click', function (e) { var b = e.target.closest('[data-act]'); if (!b || b.disabled) return; var f = act[b.dataset.act]; if (f) f(b.dataset, b, e); });
+function onClick(e) { var b = e.target.closest('[data-act]'); if (!b || b.disabled) return; var f = act[b.dataset.act]; if (f) f(b.dataset, b, e); }
+app.addEventListener('click', onClick);
+topEl.addEventListener('click', onClick); // el botón «Salir» está en la barra de arriba
 app.addEventListener('input', function (e) { var t = e.target; if (t.dataset && t.dataset.in && inp[t.dataset.in]) inp[t.dataset.in](t.value, t); });
 app.addEventListener('change', function (e) { var t = e.target; if (!t.dataset || !t.dataset.in) return; if (onchange[t.dataset.in]) onchange[t.dataset.in](t.value, t); else if (inp[t.dataset.in]) inp[t.dataset.in](t.value, t); });
 
@@ -519,5 +566,5 @@ setInterval(function () { if (S.session && S.session.role === 'op' && (mineQueue
 render();
 if (CFG.API_URL && CFG.API_KEY) { refreshBootstrap().then(function () { if (S.session && S.session.role === 'op') syncNow(); }); }
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, setCFG: function (c) { Object.assign(CFG, c); } };
+if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, setCFG: function (c) { Object.assign(CFG, c); } };
 })();
