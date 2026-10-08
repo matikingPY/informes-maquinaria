@@ -138,3 +138,14 @@ select.inp-s{width:auto;text-align:left;font-family:var(--f-body)}
 .dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
 .loading{opacity:.55;pointer-events:none}
 .h1s{font-size:1.5rem}
+
+/* pantalla de ingreso: todo entra sin deslizar */
+.login{gap:10px}
+.login .big{font-size:1.75rem}
+.login .docbox{min-height:60px;font-size:2rem}
+.login .pad{gap:8px}
+.login .pad button{min-height:56px}
+.login .btn{min-height:56px}
+.login .err{min-height:1.2em;font-size:.9375rem}
+.login .dots{margin:2px 0}
+@media (max-height:700px){.login .pad button{min-height:48px}.login .tabs2 button{min-height:40px}.login .docbox{min-height:52px}}

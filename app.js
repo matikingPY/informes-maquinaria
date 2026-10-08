@@ -187,11 +187,11 @@ function padHTML(extra) {
   return h + extra + '</div>';
 }
 function loginView() {
-  var L = S.login, h = '<div class="stack">';
+  var L = S.login, h = '<div class="stack login">';
   if ((L.role === 'op' && L.step === 'doc') || L.role === 'sup') h += '<div class="tabs2"><button data-act="role" data-r="op" aria-pressed="' + (L.role === 'op') + '">Soy operador</button><button data-act="role" data-r="sup" aria-pressed="' + (L.role === 'sup') + '">Supervisor</button></div>';
   if (L.role === 'op' && L.step === 'doc') {
-    h += '<div><h1 class="big">Ingresá tu número de documento</h1><p class="muted" style="margin:6px 0 0">Tu cédula, solo los números.</p></div>';
-    h += '<div class="docbox" aria-live="polite">' + (L.doc ? esc(fmtDoc(L.doc)) : '<span class="muted">Tu número de cédula</span>') + '</div>';
+    h += '<h1 class="big" style="text-align:center">Tu número de cédula</h1>';
+    h += '<div class="docbox" aria-live="polite">' + (L.doc ? esc(fmtDoc(L.doc)) : '<span class="muted">Escribilo acá</span>') + '</div>';
     h += '<div class="err">' + (L.busy ? '<span class="muted">Buscando…</span>' : esc(L.err)) + '</div>';
     h += padHTML('<span></span><button data-act="key" data-k="0">0</button><button data-act="key" data-k="del" aria-label="Borrar">⌫</button>');
     h += '<button class="btn primary" data-act="docGo"' + (L.doc.length < 4 || L.busy ? ' disabled' : '') + '>Continuar</button>';
