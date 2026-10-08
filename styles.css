@@ -172,3 +172,10 @@ select.inp-s{width:auto;text-align:left;font-family:var(--f-body)}
 @keyframes s-in{from{opacity:0;transform:scale(.86)}to{opacity:1;transform:scale(1)}}
 @keyframes s-bar{from{width:6%}60%{width:72%}to{width:94%}}
 @media (prefers-reduced-motion:reduce){#splash img,#splash .sbar i{animation:none}#splash .sbar i{width:60%}}
+.blk h3 .inf{margin-left:auto;white-space:nowrap;font:600 .8125rem var(--f-body,inherit);font-style:normal;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:3px 10px}
+.itpick{border:1.5px solid var(--line2);border-left:5px solid var(--accent);border-radius:12px;padding:12px;background:var(--surface);display:flex;flex-direction:column;gap:10px}
+.itpick .tg{border-radius:14px}
+.lcard{border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
+.prow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.prow label{display:flex;flex-direction:column;gap:4px;font-size:.8125rem;color:var(--muted);font-weight:600}
+.prow input{min-height:48px;font:600 1.125rem var(--f-mono);padding:6px 10px;border-radius:10px;border:1.5px solid var(--line2);background:var(--surface);color:var(--ink);width:100%}

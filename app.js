@@ -3,7 +3,8 @@
 var CFG = window.APP_CONFIG || {};
 var SAL = ':ied1';
 var ITEMS = [['limpieza','Limpieza y desbroce'],['destape','Destape de cantera'],['bolsones','Exc. de bolsones'],['exc_nc','Exc. no clasificada'],['zanja','Exc. zanja de drenaje'],['carga_prest','Carga de mat. en préstamo'],['carga_cant','Carga de mat. en cantera'],['carga_plant','Carga de mat. en plantas'],['limp_prest','Limpieza p/ préstamo'],['acopio','Trabajo en acopio'],['cantera','Trabajo en cantera'],['esp_terr','Esparcida de mat. (terraplén)'],['esp_bolson','Esparcida de mat. (exc. bolsón)'],['esp_nc','Esparcida de mat. (exc. no clasif.)'],['taludes','Arreglo de taludes'],['cachamba','Limpieza de cachamba'],['otros','Otros']];
-var ITEM_N = {}; ITEMS.forEach(function (i) { ITEM_N[i[0]] = i[1]; });
+var ITEM_N = {}; ITEMS.forEach(function (i) { ITEM_N[i[0]] = i[1]; }); // nombres de los trabajos del formato anterior (informes viejos)
+var GEN = { id: 'GEN', inf: '', name: 'Trabajo general', items: [] };
 var app = document.getElementById('app'), topEl = document.getElementById('top'), toastEl = document.getElementById('toast');
 var LS = 'ied.v1', toastT = null, renderT = null, pending = false, installEv = null;
 
@@ -14,7 +15,7 @@ var keepOps = {}; Object.keys(knownDocs).forEach(function (k) { keepOps[knownDoc
 var localOps = {}; Object.keys(saved.operators || {}).forEach(function (id) { if (keepOps[id]) localOps[id] = saved.operators[id]; });
 function newLogin(role) { return { role: role || 'op', step: 'doc', doc: '', opId: null, pin: '', first: null, err: '', busy: false }; }
 var S = {
-  machines: saved.machines || {}, operators: localOps, known: knownDocs, shift: saved.shift || 9, myReqs: saved.myReqs || [], myReqsDate: saved.myReqsDate || '',
+  machines: saved.machines || {}, catalog: saved.catalog || { works: [], items: {} }, operators: localOps, known: knownDocs, shift: saved.shift || 9, myReqs: saved.myReqs || [], myReqsDate: saved.myReqsDate || '',
   queue: saved.queue || [], failed: saved.failed || [], session: null, pendingSession: null, view: 'login', tab: 'panel',
   login: newLogin('op'), form: null, last: null, f: null, sup: null, supLoading: false,
   reqPick: null, reqNote: '', boot: 'wait', net: { syncing: false, lastErr: '' }
@@ -26,7 +27,7 @@ if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
 
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed }));
+    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, catalog: S.catalog, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed }));
   } catch (e) {}
 }
 
@@ -79,7 +80,7 @@ var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
   bad_pin: 'PIN incorrecto', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
   unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
-  bad_date: 'Fecha inválida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
+  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
 };
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
 
@@ -103,11 +104,12 @@ function applyMachines(list) {
   S.queue.forEach(function (q) { var m = o[q.r.machineId]; if (m && q.r.hFin > m.horo) m.horo = q.r.hFin; });
   S.machines = o;
 }
+function applyCatalog(c) { if (c && c.works && c.items) S.catalog = c; }
 function applyBootstrap(res) {
-  applyMachines(res.machines); S.shift = res.shiftHours || 9;
+  applyMachines(res.machines); applyCatalog(res.catalog); S.shift = res.shiftHours || 9;
 }
 function applySync(res) {
-  applyMachines(res.machines); S.myReqs = res.requests || []; S.myReqsDate = res.serverDate || today();
+  applyMachines(res.machines); applyCatalog(res.catalog); S.myReqs = res.requests || []; S.myReqsDate = res.serverDate || today();
   var o = S.operators[res.operator.id]; if (o) { o.machineId = res.operator.machineId; o.name = res.operator.name || o.name; o.hasPin = true; }
 }
 function refreshBootstrap() {
@@ -225,7 +227,7 @@ function docDone() {
   var L = S.login, doc = normDoc(L.doc); if (L.busy || doc.length < 4) return;
   L.busy = true; L.err = ''; render();
   api('identify', { doc: doc }).then(function (res) {
-    applyMachines(res.machines); S.shift = res.shiftHours || 9;
+    applyMachines(res.machines); applyCatalog(res.catalog); S.shift = res.shiftHours || 9;
     var op = res.operator, old = S.operators[op.id] || {};
     S.operators[op.id] = Object.assign({}, old, { id: op.id, name: op.name, machineId: op.machineId, hasPin: op.hasPin });
     S.known[doc] = op.id; save();
@@ -278,7 +280,7 @@ function opHome() {
   var h = '<div class="stack"><div><div class="muted">' + esc(dfull(today())) + '</div><h1 class="big">Hola, ' + esc(op.name.split(' ')[0]) + '</h1></div>';
   if (q.length) h += '<div class="callout warn">Tenés ' + q.length + ' informe' + (q.length > 1 ? 's' : '') + ' sin enviar. Se envían solos cuando haya señal. <button class="link" data-act="syncnow">Enviar ahora</button></div>';
   fl.forEach(function (f) { h += '<div class="callout">No se pudo enviar el informe del ' + esc(dlong(f.r.date)) + ' de ' + esc(mcode(f.r.machineId)) + ': ' + esc(ERR[f.error] || f.error) + '. Avisale a tu supervisor. <button class="link" data-act="discard" data-id="' + esc(f.r.id) + '">Descartar</button></div>'; });
-  if (m) h += '<div class="mcard"><div class="mrow"><span class="eyebrow">Tu máquina</span><span class="mtype">' + esc(m.name) + '</span></div><div class="mrow"><div class="mcode">' + esc(m.code) + '</div>' + mIcon(m, true, 128) + '</div><div class="horo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6a60" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M12 3v2"/></svg><span>Último horómetro</span><b>' + fmt(m.horo) + '</b></div></div><button class="btn primary" data-act="newForm" data-m="' + esc(m.id) + '">Cargar informe de hoy</button>';
+  if (m) h += '<div class="mcard"><div class="mrow"><span class="eyebrow">Tu máquina</span><span class="mtype">' + esc(m.name) + '</span></div><div class="mrow"><div class="mcode">' + esc(m.code) + '</div>' + mIcon(m, true, 128) + '</div><div class="horo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6a60" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M12 3v2"/></svg><span>Último horómetro</span><b>' + (m.horo > 0 ? fmt(m.horo) : '—') + '</b></div></div><button class="btn primary" data-act="newForm" data-m="' + esc(m.id) + '">Cargar informe de hoy</button>';
   else h += '<div class="callout warn">No tenés una máquina asignada. Pedí autorización para la que vas a usar.</div>';
   myReqs().forEach(function (r) {
     if (r.status === 'aprobada') h += '<div class="card"><div class="eyebrow">Autorizada para hoy</div><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0 12px"><b class="mono" style="font-size:1.25rem">' + esc(r.machineCode) + '</b><span class="pill ok">Aprobada</span></div><button class="btn primary" data-act="newForm" data-m="' + esc(r.machineId) + '">Cargar informe con ' + esc(r.machineCode) + '</button></div>';
@@ -311,8 +313,8 @@ function allowed() {
   return ids.filter(function (i) { return S.machines[i]; });
 }
 function newForm(mid) {
-  var m = S.machines[mid];
-  S.form = { machineId: mid, date: today(), hIni: String(m.horo).replace('.', ','), unlock: false, hFin: '', items: [], hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '' };
+  var m = S.machines[mid], primera = !(m.horo > 0);
+  S.form = { machineId: mid, date: today(), hIni: primera ? '' : String(m.horo).replace('.', ','), unlock: primera, first: primera, hFin: '', works: [], pick: {}, prog: {}, hrs: {}, hrsEdited: false, fuel: null, ftype: 'Gasoil', liters: '', fhoro: '', notes: '' };
   go('form');
 }
 function formHTML() {
@@ -324,10 +326,11 @@ function formHTML() {
   h += '<label class="fld">Fecha<input class="txt" type="date" id="f-date" data-in="date" value="' + esc(F.date) + '" max="' + today() + '"></label></section>';
   h += '<section class="blk"><h3><span>2</span>Horómetro</h3>';
   h += '<label class="fld">Inicial' + (F.unlock ? '' : ' <span class="muted" style="font-weight:400">(el último que se registró)</span>') + '<input class="num" id="f-hini" data-in="hIni" inputmode="decimal" autocomplete="off" value="' + esc(F.hIni) + '"' + (F.unlock ? '' : ' readonly') + '></label>';
+  if (F.first) h += '<p class="muted small" style="margin:0">Es el primer informe de esta máquina. Escribí el número que marca el horómetro ahora, antes de empezar.</p>';
   if (!F.unlock) h += '<button class="link" data-act="unlock" style="align-self:flex-start">El horómetro no marca ese número</button>';
   h += '<label class="fld">Final<input class="num" id="f-hfin" data-in="hFin" inputmode="decimal" autocomplete="off" placeholder="0000,0" value="' + esc(F.hFin) + '"></label>';
   h += '<div class="hbox" id="hbox"><span>Horas trabajadas</span><span class="mono" id="hval">—</span></div><div class="small" id="hmsg" style="min-height:1.2em"></div></section>';
-  h += '<section class="blk"><h3><span>3</span>Trabajos realizados</h3><p class="muted small" style="margin:0">Tocá todos los que hiciste.</p><div class="tgl">' + ITEMS.map(function (i) { return '<button class="tg" data-act="item" data-k="' + i[0] + '" aria-pressed="' + (F.items.indexOf(i[0]) > -1) + '">' + esc(i[1]) + '</button>'; }).join('') + '</div><div id="hrows">' + hrowsHTML() + '</div></section>';
+  h += '<section class="blk"><h3><span>3</span>Trabajos realizados' + (m.inf ? '<em class="inf">Informe ' + esc(m.inf) + '</em>' : '') + '</h3><div id="wblk" class="stack tight">' + worksHTML() + '</div></section>';
   h += '<section class="blk"><h3><span>4</span>Combustible</h3><p class="muted small" style="margin:0">¿Cargaste combustible?</p><div class="grid2"><button class="tg c" data-act="fuel" data-v="no" aria-pressed="' + (F.fuel === false) + '">No</button><button class="tg c" data-act="fuel" data-v="si" aria-pressed="' + (F.fuel === true) + '">Sí</button></div>';
   h += '<div id="fuelf" class="stack tight"' + (F.fuel === true ? '' : ' hidden') + '><div class="grid2"><button class="tg c" data-act="ftype" data-v="Gasoil" aria-pressed="' + (F.ftype === 'Gasoil') + '">Gasoil</button><button class="tg c" data-act="ftype" data-v="Nafta" aria-pressed="' + (F.ftype === 'Nafta') + '">Nafta</button></div><label class="fld">Litros cargados<input class="num" id="f-lit" data-in="liters" inputmode="decimal" autocomplete="off" value="' + esc(F.liters) + '"></label><label class="fld">Horómetro al cargar<input class="num" id="f-fh" data-in="fhoro" inputmode="decimal" autocomplete="off" value="' + esc(F.fhoro) + '"></label></div></section>';
   h += '<section class="blk"><h3><span>5</span>Observaciones</h3><label class="fld"><span class="muted" style="font-weight:400">Si hubo avería, parada o algo para avisar (opcional)</span><textarea class="txt" id="f-notes" data-in="notes">' + esc(F.notes) + '</textarea></label></section>';
@@ -335,23 +338,70 @@ function formHTML() {
   return h;
 }
 function totalHours() { var F = S.form, a = parseNum(F.hIni), b = parseNum(F.hFin); return isFinite(a) && isFinite(b) ? r1(b - a) : NaN; }
+/* trabajos del informe de la máquina y, para cada uno, los ítems del certificado donde puede cargarse */
+var INFORMES = { A: 'Asfalto', B: 'Conformación y compactación', C: 'Movimiento de suelos', D: 'Transporte' };
+function catWorks(m) {
+  var inf = (m && m.inf) || '';
+  return S.catalog.works.filter(function (w) { return w.inf === inf; });
+}
+function workById(id) { var r = null; S.catalog.works.forEach(function (w) { if (w.id === id) r = w; }); return r; }
+function itemName(id) { var i = S.catalog.items[id]; return i ? i.name : id; }
+function lineList() {
+  var F = S.form, out = [];
+  F.works.forEach(function (wid) {
+    var w = workById(wid); if (!w) return;
+    if (w.items.length) w.items.forEach(function (iid) { if (F.pick[wid] && F.pick[wid][iid]) out.push({ k: wid + '|' + iid, w: wid, i: iid }); });
+    else out.push({ k: wid + '|', w: wid, i: '' });
+  });
+  return out;
+}
+function lineLabel(l) { var w = workById(l.w); return (w ? w.name : l.w) + (l.i ? ' → ' + itemName(l.i) : ''); }
+function worksHTML() {
+  var F = S.form, m = S.machines[F.machineId], ws = catWorks(m);
+  if (!ws.length) return '<div class="callout warn">Todavía no se descargaron los trabajos de esta máquina. Conectate a internet un momento y volvé a entrar.</div>';
+  var h = '<p class="muted small" style="margin:0">Tocá todos los que hiciste.</p><div class="tgl">' + ws.map(function (w) { return '<button class="tg" data-act="work" data-w="' + esc(w.id) + '" aria-pressed="' + (F.works.indexOf(w.id) > -1) + '">' + esc(w.name) + '</button>'; }).join('') + '</div>';
+  F.works.forEach(function (wid) {
+    var w = workById(wid); if (!w || !w.items.length) return;
+    h += '<div class="itpick"><div class="small"><b>' + esc(w.name) + '</b>: ¿para qué ítem lo hiciste?</div><div class="tgl">' + w.items.map(function (iid) { return '<button class="tg" data-act="witem" data-w="' + esc(wid) + '" data-i="' + esc(iid) + '" aria-pressed="' + !!(F.pick[wid] && F.pick[wid][iid]) + '">' + esc(itemName(iid)) + '</button>'; }).join('') + '</div></div>';
+  });
+  return h + '<div id="hrows">' + hrowsHTML() + '</div>';
+}
+/* progresiva: se escribe 102120 o 102+120 y queda 102+120 (kilómetro + metros) */
+function parseProg(v) {
+  v = String(v == null ? '' : v).trim(); if (!v) return null;
+  var km, m, p = v.split('+');
+  if (p.length === 2) { if (!/^\d{1,3}$/.test(p[0].trim()) || !/^\d{1,3}$/.test(p[1].trim())) return false; km = +p[0]; m = +p[1]; }
+  else { var d = v.replace(/\D/g, ''); if (!d || d !== v.replace(/\s/g, '') || d.length > 6) return false; var n = +d; km = Math.floor(n / 1000); m = n % 1000; }
+  if (m > 999) return false;
+  return { txt: km + '+' + ('00' + m).slice(-3), m: km * 1000 + m };
+}
 function hrowsHTML() {
-  var F = S.form, n = F.items.length; if (!n) return '';
-  if (n === 1) return '<p class="muted small" style="margin:0">Todas las horas van a «' + esc(ITEM_N[F.items[0]]) + '».</p>';
-  return '<div class="stack tight"><p class="muted small" style="margin:6px 0 0">Repartí las horas entre los trabajos.</p>' + F.items.map(function (k) { return '<div class="hrow"><span>' + esc(ITEM_N[k]) + '</span><input data-in="hrs" data-k="' + k + '" inputmode="decimal" autocomplete="off" value="' + esc(F.hrs[k] == null ? '' : F.hrs[k]) + '"></div>'; }).join('') + '<div class="small" id="hsum" style="font-weight:600"></div></div>';
+  var F = S.form, ls = lineList(), n = ls.length; if (!n) return '';
+  var h = '<div class="stack tight">' + (n > 1 ? '<p class="muted small" style="margin:6px 0 0">Repartí las horas entre los trabajos.</p>' : '');
+  ls.forEach(function (l) {
+    var p = F.prog[l.k] || {};
+    h += '<div class="lcard"><b class="small">' + esc(lineLabel(l)) + '</b>';
+    if (n > 1) h += '<div class="hrow"><span>Horas</span><input data-in="hrs" data-k="' + esc(l.k) + '" inputmode="decimal" autocomplete="off" value="' + esc(F.hrs[l.k] == null ? '' : F.hrs[l.k]) + '"></div>';
+    if (l.i) h += '<div class="prow"><label>Progresiva desde<input data-in="pa" data-k="' + esc(l.k) + '" inputmode="numeric" autocomplete="off" placeholder="102+120" value="' + esc(p.a || '') + '"></label><label>hasta<input data-in="pb" data-k="' + esc(l.k) + '" inputmode="numeric" autocomplete="off" placeholder="102+700" value="' + esc(p.b || '') + '"></label></div>';
+    h += '</div>';
+  });
+  if (n > 1) h += '<div class="small" id="hsum" style="font-weight:600"></div>';
+  else h += '<p class="muted small" style="margin:0">Todas las horas van a «' + esc(lineLabel(ls[0])) + '».</p>';
+  return h + '</div>';
 }
 function split() {
-  var F = S.form, t = totalHours(), n = F.items.length; if (!(t > 0) || n < 2) return;
-  var each = r1(t / n), acc = 0; F.items.forEach(function (k, i) { var v = i === n - 1 ? r1(t - acc) : each; acc += v; F.hrs[k] = String(v).replace('.', ','); });
+  var F = S.form, t = totalHours(), ls = lineList(), n = ls.length; if (!(t > 0) || n < 2) return;
+  var each = r1(t / n), acc = 0; ls.forEach(function (l, i) { var v = i === n - 1 ? r1(t - acc) : each; acc += v; F.hrs[l.k] = String(v).replace('.', ','); });
 }
 function liveUpdate() {
   var F = S.form, t = totalHours(), box = document.getElementById('hbox'), val = document.getElementById('hval'), msg = document.getElementById('hmsg'); if (!box) return;
   if (isFinite(t) && t > 0 && t <= 24) { val.textContent = fmt(t) + ' h'; box.className = 'hbox'; msg.textContent = t > 14 ? 'Son muchas horas. Revisá el número final.' : ''; msg.style.color = 'var(--warn)'; }
   else if (isFinite(t)) { val.textContent = '—'; box.className = 'hbox bad'; msg.textContent = t <= 0 ? 'El horómetro final tiene que ser mayor que el inicial.' : 'Son más de 24 horas. Revisá el horómetro final.'; msg.style.color = 'var(--crit)'; }
   else { val.textContent = '—'; box.className = 'hbox'; msg.textContent = ''; }
-  if (F.items.length > 1) {
-    if (!F.hrsEdited) { split(); document.querySelectorAll('#hrows input[data-k]').forEach(function (i) { i.value = F.hrs[i.dataset.k] || ''; }); }
-    var s = 0; F.items.forEach(function (k) { var v = parseNum(F.hrs[k]); if (isFinite(v)) s += v; }); s = r1(s);
+  var ls = lineList();
+  if (ls.length > 1) {
+    if (!F.hrsEdited) { split(); document.querySelectorAll('#hrows input[data-in="hrs"]').forEach(function (i) { i.value = F.hrs[i.dataset.k] || ''; }); }
+    var s = 0; ls.forEach(function (l) { var v = parseNum(F.hrs[l.k]); if (isFinite(v)) s += v; }); s = r1(s);
     var el = document.getElementById('hsum'); if (el) { if (isFinite(t) && t > 0) { var ok = Math.abs(s - t) <= 0.05; el.textContent = 'Sumás ' + fmt(s) + ' de ' + fmt(t) + ' h' + (ok ? ' ✓' : ''); el.style.color = ok ? 'var(--good)' : 'var(--warn)'; } else el.textContent = ''; }
   }
 }
@@ -373,13 +423,22 @@ function buildReport() {
   }
   if (!F.date || F.date > t) errs.push('La fecha no puede ser de un día futuro.');
   else if (F.date !== t) flags.push('Fecha distinta de hoy');
-  var items = {};
-  if (!F.items.length) errs.push('Elegí al menos un trabajo realizado.');
-  else if (F.items.length === 1) items[F.items[0]] = hours;
-  else {
-    var s = 0; F.items.forEach(function (k) { var v = parseNum(F.hrs[k]); if (!isFinite(v) || v < 0) v = 0; items[k] = v; s += v; }); s = r1(s);
+  var lines = [], ls = lineList();
+  if (!F.works.length) errs.push('Elegí al menos un trabajo realizado.');
+  F.works.forEach(function (wid) { var w = workById(wid); if (w && w.items.length && !ls.some(function (l) { return l.w === wid; })) errs.push('Elegí para qué ítem hiciste «' + w.name + '».'); });
+  if (ls.length === 1) lines.push({ w: ls[0].w, i: ls[0].i, h: hours > 0 ? hours : 0 });
+  else if (ls.length > 1) {
+    var s = 0; ls.forEach(function (l) { var v = parseNum(F.hrs[l.k]); if (!isFinite(v) || v < 0) v = 0; v = r1(v); lines.push({ w: l.w, i: l.i, h: v }); s += v; }); s = r1(s);
     if (hours > 0 && Math.abs(s - hours) > 0.05) errs.push('Las horas de los trabajos suman ' + fmt(s) + ' y tienen que sumar ' + fmt(hours) + '.');
+    else if (lines.some(function (l) { return !(l.h > 0); })) errs.push('Falta repartir horas en uno de los trabajos. Si no lo hiciste, sacalo.');
   }
+  ls.forEach(function (l, k) {
+    if (!l.i) return;
+    var p = F.prog[l.k] || {}, a = parseProg(p.a), b = parseProg(p.b), nm = lineLabel(l);
+    if (!a || !b) errs.push('Completá la progresiva desde y hasta de «' + nm + '» (ej. 102+120).');
+    else if (a.m === b.m) errs.push('La progresiva desde y hasta de «' + nm + '» no pueden ser iguales.');
+    else if (lines[k]) { lines[k].pi = a.txt; lines[k].pf = b.txt; }
+  });
   var fuel = null;
   if (F.fuel === null) errs.push('Contestá si cargaste combustible.');
   else if (F.fuel) {
@@ -389,20 +448,20 @@ function buildReport() {
     else if (isFinite(hIni) && isFinite(hFin) && (fh < hIni || fh > hFin)) errs.push('El horómetro de la carga tiene que estar entre ' + fmt(hIni) + ' y ' + fmt(hFin) + '.');
     if (L > 0 && isFinite(fh)) fuel = { type: F.ftype, liters: L, horo: fh };
   }
-  if (F.unlock && isFinite(hIni) && Math.abs(hIni - m.horo) > 0.05) flags.push('Horómetro inicial distinto al último registrado (' + fmt(m.horo) + ')');
-  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, items: items, fuel: fuel, notes: F.notes.trim(), flags: flags, createdAt: new Date().toISOString() }, hours: hours };
+  if (F.unlock && !F.first && isFinite(hIni) && Math.abs(hIni - m.horo) > 0.05) flags.push('Horómetro inicial distinto al último registrado (' + fmt(m.horo) + ')');
+  return { errs: errs, report: { id: uid(), date: F.date, machineId: m.id, hIni: hIni, hFin: hFin, lines: lines, fuel: fuel, notes: F.notes.trim(), flags: flags, createdAt: new Date().toISOString() }, hours: hours };
 }
 function submitForm() {
   var b = buildReport(); if (b.errs.length) { showErrs(b.errs); return; }
   var r = b.report, m = S.machines[r.machineId];
   S.queue.push({ opId: S.session.opId, r: r });
   m.horo = Math.max(m.horo, r.hFin);
-  S.last = { id: r.id, date: r.date, machineCode: m.code, hIni: r.hIni, hFin: r.hFin, hours: b.hours, items: r.items, fuel: r.fuel, flags: r.flags };
+  S.last = { id: r.id, date: r.date, machineCode: m.code, hIni: r.hIni, hFin: r.hFin, hours: b.hours, lines: r.lines.map(function (l) { return { label: lineLabel(l), h: l.h, pi: l.pi, pf: l.pf }; }), fuel: r.fuel, flags: r.flags };
   save(); go('done'); syncNow();
 }
 function doneView() {
   var r = S.last; if (!r) return '';
-  var ks = Object.keys(r.items), it = ks.map(function (k) { return ITEM_N[k] + (ks.length > 1 ? ' (' + fmt(r.items[k]) + ' h)' : ''); }).join(', ');
+  var it = r.lines.map(function (l) { return l.label + (l.pi ? ' (' + l.pi + ' a ' + l.pf + (r.lines.length > 1 ? ', ' + fmt(l.h) + ' h' : '') + ')' : (r.lines.length > 1 ? ' (' + fmt(l.h) + ' h)' : '')); }).join(', ');
   var enCola = S.queue.some(function (q) { return q.r.id === r.id; });
   var estado = enCola ? '<div class="callout warn" style="text-align:left">Guardado en este celular. Se envía solo cuando haya señal.</div>' : '<div class="callout ok" style="text-align:left">Enviado a la planilla ✓</div>';
   return '<div class="done stack"><div class="check">✓</div><h1 class="big">Informe cargado</h1><dl class="sum"><dt>Máquina</dt><dd class="mono">' + esc(r.machineCode) + '</dd><dt>Fecha</dt><dd>' + esc(dlong(r.date)) + '</dd><dt>Horas</dt><dd class="mono">' + fmt(r.hours) + ' h (' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + ')</dd><dt>Trabajos</dt><dd>' + esc(it) + '</dd><dt>Combustible</dt><dd>' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L de ' + esc(r.fuel.type) : 'No cargó') + '</dd></dl>' + estado + (r.flags.length ? '<div class="callout warn" style="text-align:left">Tu supervisor va a revisar este informe: ' + esc(r.flags.join('; ')) + '.</div>' : '') + '<button class="btn primary" data-act="home">Listo</button></div>';
@@ -436,9 +495,20 @@ function stats() {
     var nd = Object.keys(days).length, lph = h > 0 && L > 0 ? L / h : null, prog = wd * sh;
     return { m: m, days: nd, hours: h, liters: L, lph: lph, ref: m.refLph, hpd: nd ? h / nd : 0, util: prog ? h / prog : 0, cost: h * (m.tarifa || 0) + L * fp };
   });
-  var items = {}; rs.forEach(function (r) { var m = byM[r.machineId], t = m ? m.tarifa || 0 : 0; Object.keys(r.items || {}).forEach(function (k) { var o = items[k] || (items[k] = { h: 0, c: 0 }); o.h += r.items[k]; o.c += r.items[k] * t; }); });
+  var items = {}; rs.forEach(function (r) { var m = byM[r.machineId], t = m ? m.tarifa || 0 : 0; repLines(r).forEach(function (l) { var o = items[l.key] || (items[l.key] = { h: 0, c: 0, label: l.label, apoyo: l.apoyo }); o.h += l.h; o.c += l.h * t; }); });
   var H = rows.reduce(function (a, r) { return a + r.hours; }, 0), L2 = rows.reduce(function (a, r) { return a + r.liters; }, 0), C = rows.reduce(function (a, r) { return a + r.cost; }, 0);
   return { rs: rs, rows: rows, items: items, H: H, L: L2, C: C };
+}
+function supNames() {
+  if (S.sup._nm) return S.sup._nm;
+  var c = S.sup.catalog || { works: [], items: {} }, w = {}; (c.works || []).forEach(function (x) { w[x.id] = x.name; });
+  return (S.sup._nm = { w: w, i: c.items || {} });
+}
+function lineKey(l) { var n = supNames(); return l.i ? { key: 'i:' + l.i, label: (n.i[l.i] && n.i[l.i].name) || l.i, apoyo: false } : { key: 'w:' + l.w, label: (n.w[l.w] || l.w), apoyo: true }; }
+function lineText(l) { var n = supNames(), w = n.w[l.w] || l.w; return w + (l.i ? ' → ' + ((n.i[l.i] && n.i[l.i].name) || l.i) : '') + (l.pi ? ' [' + l.pi + ' a ' + l.pf + ']' : ''); }
+function repLines(r) { // líneas de un informe: formato nuevo o, si es viejo, los trabajos de la lista anterior
+  if (r.lines && r.lines.length) return r.lines.map(function (l) { var k = lineKey(l); return { key: k.key, label: k.label, apoyo: k.apoyo, text: lineText(l), h: l.h }; });
+  return Object.keys(r.items || {}).map(function (k) { return { key: 'o:' + k, label: ITEM_N[k] || k, apoyo: false, text: ITEM_N[k] || k, h: r.items[k] }; });
 }
 function bars(rows, fmtv, max) {
   var mx = max || Math.max.apply(null, rows.map(function (r) { return r.v; }).concat([0.0001]));
@@ -466,7 +536,7 @@ function panelView() {
   var lph = s.H > 0 && s.L > 0 ? s.L / s.H : null;
   h += '<div class="kpis"><div class="kpi"><span class="eyebrow">Horas trabajadas</span><span class="v">' + fmt(s.H) + '<small>h</small></span></div><div class="kpi"><span class="eyebrow">Combustible cargado</span><span class="v">' + fmt(s.L, 0) + '<small>L</small></span></div><div class="kpi"><span class="eyebrow">Consumo medio</span><span class="v">' + (lph ? fmt(lph) : '—') + '<small>L/h</small></span></div><div class="kpi"><span class="eyebrow">Costo estimado</span><span class="v">' + gs(s.C) + '</span></div></div>';
   var byM = s.rows.slice().sort(function (a, b) { return b.hours - a.hours; }).map(function (r) { return { l: r.m.code, v: r.hours }; });
-  var byI = Object.keys(s.items).map(function (k) { return { l: ITEM_N[k] || k, v: s.items[k].h }; }).sort(function (a, b) { return b.v - a.v; });
+  var byI = Object.keys(s.items).map(function (k) { return { l: s.items[k].label + (s.items[k].apoyo ? ' (apoyo)' : ''), v: s.items[k].h }; }).sort(function (a, b) { return b.v - a.v; });
   var fuelRows = s.rows.filter(function (r) { return r.lph && r.ref; }).sort(function (a, b) { return (b.lph / b.ref) - (a.lph / a.ref); });
   var fmx = Math.max.apply(null, fuelRows.map(function (r) { return Math.max(r.lph, r.ref); }).concat([1])) * 1.1;
   var fh = fuelRows.map(function (r) {
@@ -475,12 +545,12 @@ function panelView() {
   }).join('') || '<p class="muted small">Sin cargas de combustible en este período.</p>';
   var util = s.rows.slice().sort(function (a, b) { return b.util - a.util; }).map(function (r) { return { l: r.m.code, v: r.util * 100 }; });
   h += '<div class="panels"><section class="panel"><h2>Horas por máquina</h2><div class="sub">Suma de horas de los informes</div>' + bars(byM, function (v) { return fmt(v) + ' h'; }) + '</section>' +
-    '<section class="panel"><h2>Horas por ítem de trabajo</h2><div class="sub">Todas las máquinas del filtro</div>' + bars(byI, function (v) { return fmt(v) + ' h'; }) + '</section>' +
+    '<section class="panel"><h2>Horas por ítem del certificado</h2><div class="sub">Todas las máquinas del filtro</div>' + bars(byI, function (v) { return fmt(v) + ' h'; }) + '</section>' +
     '<section class="panel"><h2>Rendimiento de combustible</h2><div class="sub">Litros cargados ÷ horas trabajadas</div><div class="legend"><span><i class="fill" style="position:static;display:inline-block;width:18px;height:8px;border-radius:2px"></i>Consumo real (L/h)</span><span><i class="tick" style="position:static;display:inline-block;height:12px"></i>Referencia</span></div>' + fh + '</section>' +
     '<section class="panel"><h2>Utilización de las máquinas</h2><div class="sub">Horas trabajadas ÷ horas programadas (' + fmt(cfg.shiftHours || 9, 0) + ' h por día, lunes a sábado)</div>' + bars(util, function (v) { return fmt(v, 0) + ' %'; }, 100) + '</section></div>';
   h += '<div class="sec"><h2>Resumen por máquina</h2></div><div class="tblw"><table><thead><tr><th>Máquina</th><th class="n">Días</th><th class="n">Horas</th><th class="n">Hs/día</th><th class="n">Utiliz.</th><th class="n">Litros</th><th class="n">L/h</th><th class="n">Ref. L/h</th><th class="n">Costo</th></tr></thead><tbody>' + s.rows.map(function (r) { return '<tr><td><b>' + esc(r.m.code) + '</b><div class="muted small">' + esc(r.m.name) + '</div></td><td class="n">' + r.days + '</td><td class="n">' + fmt(r.hours) + '</td><td class="n">' + fmt(r.hpd) + '</td><td class="n">' + fmt(r.util * 100, 0) + ' %</td><td class="n">' + fmt(r.liters, 0) + '</td><td class="n">' + (r.lph ? fmt(r.lph) : '—') + '</td><td class="n">' + fmt(r.ref || 0, 0) + '</td><td class="n">' + gs(r.cost) + '</td></tr>'; }).join('') + '<tr><td><b>Total</b></td><td class="n"></td><td class="n"><b>' + fmt(s.H) + '</b></td><td class="n"></td><td class="n"></td><td class="n"><b>' + fmt(s.L, 0) + '</b></td><td class="n"></td><td class="n"></td><td class="n"><b>' + gs(s.C) + '</b></td></tr></tbody></table></div>';
   h += '<p class="muted small" style="margin-top:10px">Costo = horas × tarifa horaria de la máquina + litros × precio del combustible. Para cambiar tarifas, consumos de referencia, máquinas u operadores, editá las hojas de la planilla de Google y tocá «Actualizar».</p>';
-  var ih = Object.keys(s.items).sort(function (a, b) { return s.items[b].h - s.items[a].h; }).map(function (k) { var o = s.items[k]; return '<tr><td>' + esc(ITEM_N[k] || k) + '</td><td class="n">' + fmt(o.h) + '</td><td class="n">' + (s.H ? fmt(o.h / s.H * 100, 0) : 0) + ' %</td><td class="n">' + gs(o.c) + '</td></tr>'; }).join('');
+  var ih = Object.keys(s.items).sort(function (a, b) { return s.items[b].h - s.items[a].h; }).map(function (k) { var o = s.items[k]; return '<tr><td>' + esc(o.label) + (o.apoyo ? ' <span class="muted small">(trabajo de apoyo, sin ítem)</span>' : '') + '</td><td class="n">' + fmt(o.h) + '</td><td class="n">' + (s.H ? fmt(o.h / s.H * 100, 0) : 0) + ' %</td><td class="n">' + gs(o.c) + '</td></tr>'; }).join('');
   h += '<div class="sec"><h2>Detalle por ítem</h2></div><div class="tblw"><table><thead><tr><th>Ítem</th><th class="n">Horas</th><th class="n">% del total</th><th class="n">Costo de máquina</th></tr></thead><tbody>' + (ih || '<tr><td colspan="4" class="muted">Sin datos en este período.</td></tr>') + '</tbody></table></div>';
   return h;
 }
@@ -489,7 +559,7 @@ function informesView() {
   var rs = filt().slice().sort(function (a, b) { return b.date.localeCompare(a.date); }), lim = rs.slice(0, 150);
   var h = '<div class="sec" style="margin-top:0"><h2>Informes (' + rs.length + ')</h2><button class="btn sm" data-act="csv">Descargar CSV</button></div><div class="tblw"><table><thead><tr><th>Fecha</th><th>Máquina</th><th>Operador</th><th class="n">Horómetro</th><th class="n">Horas</th><th>Trabajos</th><th class="n">Combustible</th><th>Estado</th></tr></thead><tbody>';
   h += lim.map(function (r) {
-    var ks = Object.keys(r.items || {}), chips = ks.map(function (k) { return '<span class="pill">' + esc(ITEM_N[k] || k) + (ks.length > 1 ? ' · ' + fmt(r.items[k]) : '') + '</span>'; }).join('');
+    var rl = repLines(r), chips = rl.map(function (l) { return '<span class="pill">' + esc(l.text) + (rl.length > 1 ? ' · ' + fmt(l.h) : '') + '</span>'; }).join('');
     var ex = r.status === 'validar' ? '<div class="small" style="color:var(--warn);margin-top:4px">' + esc((r.flags || []).join('; ')) + '</div>' + (r.notes ? '<div class="small muted">' + esc(r.notes) + '</div>' : '') + '<button class="btn sm" style="margin-top:6px" data-act="valid" data-id="' + esc(r.id) + '">Dar por válido</button>' : (r.notes ? '<div class="small muted" style="margin-top:4px">' + esc(r.notes) + '</div>' : '');
     return '<tr><td style="white-space:nowrap">' + esc(dmy(r.date)) + '</td><td><b>' + esc(r.machineCode) + '</b></td><td>' + esc(r.operatorName) + '</td><td class="n">' + fmt(r.hIni) + ' → ' + fmt(r.hFin) + '</td><td class="n">' + fmt(r.hours) + '</td><td><div class="chips">' + chips + '</div></td><td class="n">' + (r.fuel ? fmt(r.fuel.liters, 0) + ' L' : '—') + '</td><td>' + stPill(r) + ex + '</td></tr>';
   }).join('') || '<tr><td colspan="8" class="muted">No hay informes en este período.</td></tr>';
@@ -505,13 +575,14 @@ function solicitudesView() {
 function csvExport() {
   var q = function (v) { v = String(v == null ? '' : v); return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   var rows = [['Fecha', 'Máquina', 'Operador', 'Horómetro inicial', 'Horómetro final', 'Horas', 'Trabajos', 'Combustible', 'Litros', 'Horómetro de carga', 'Estado', 'Observaciones']];
-  filt().slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (r) { rows.push([r.date, r.machineCode, r.operatorName, String(r.hIni).replace('.', ','), String(r.hFin).replace('.', ','), String(r.hours).replace('.', ','), Object.keys(r.items || {}).map(function (k) { return (ITEM_N[k] || k) + ': ' + r.items[k]; }).join(' | '), r.fuel ? r.fuel.type : '', r.fuel ? String(r.fuel.liters).replace('.', ',') : '', r.fuel ? String(r.fuel.horo).replace('.', ',') : '', r.status === 'validar' ? 'A revisar' : 'Válido', r.notes || '']); });
+  filt().slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (r) { rows.push([r.date, r.machineCode, r.operatorName, String(r.hIni).replace('.', ','), String(r.hFin).replace('.', ','), String(r.hours).replace('.', ','), repLines(r).map(function (l) { return l.text + ': ' + l.h; }).join(' | '), r.fuel ? r.fuel.type : '', r.fuel ? String(r.fuel.liters).replace('.', ',') : '', r.fuel ? String(r.fuel.horo).replace('.', ',') : '', r.status === 'validar' ? 'A revisar' : 'Válido', r.notes || '']); });
   var blob = new Blob(['﻿' + rows.map(function (r) { return r.map(q).join(';'); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'informes-maquinaria-' + S.f.from + '_' + S.f.to + '.csv';
   document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
 
 /* ---------- acciones ---------- */
+function rework() { var el = document.getElementById('wblk'); if (el) el.innerHTML = worksHTML(); liveUpdate(); }
 var act = {
   role: function (d) { S.login = newLogin(d.r); render(); },
   key: function (d) { keyPress(d.k); },
@@ -525,12 +596,15 @@ var act = {
   reqPick: function (d) { S.reqPick = d.m; render(); },
   reqSend: reqSend,
   newForm: function (d) { newForm(d.m); },
-  fmach: function (d) { var m = S.machines[d.m]; S.form.machineId = d.m; S.form.hIni = String(m.horo).replace('.', ','); S.form.unlock = false; render(); },
+  fmach: function (d) { var m = S.machines[d.m]; var F = S.form; F.machineId = d.m; F.first = !(m.horo > 0); F.hIni = F.first ? '' : String(m.horo).replace('.', ','); F.unlock = F.first; F.works = []; F.pick = {}; F.prog = {}; F.hrs = {}; F.hrsEdited = false; render(); },
   unlock: function () { S.form.unlock = true; render(); var i = document.getElementById('f-hini'); if (i) i.focus(); },
-  item: function (d, b) {
-    var F = S.form, i = F.items.indexOf(d.k); if (i > -1) { F.items.splice(i, 1); delete F.hrs[d.k]; } else F.items.push(d.k);
-    F.hrsEdited = false; b.setAttribute('aria-pressed', String(F.items.indexOf(d.k) > -1));
-    split(); document.getElementById('hrows').innerHTML = hrowsHTML(); liveUpdate();
+  work: function (d) {
+    var F = S.form, i = F.works.indexOf(d.w); if (i > -1) { F.works.splice(i, 1); delete F.pick[d.w]; } else F.works.push(d.w);
+    F.hrsEdited = false; F.hrs = {}; rework();
+  },
+  witem: function (d) {
+    var F = S.form, p = F.pick[d.w] || (F.pick[d.w] = {}); if (p[d.i]) delete p[d.i]; else p[d.i] = true;
+    F.hrsEdited = false; F.hrs = {}; rework();
   },
   fuel: function (d) {
     var F = S.form; F.fuel = d.v === 'si';
@@ -554,7 +628,9 @@ var inp = {
   hFin: function (v) { S.form.hFin = v; liveUpdate(); },
   hrs: function (v, el) { S.form.hrs[el.dataset.k] = v; S.form.hrsEdited = true; liveUpdate(); },
   liters: function (v) { S.form.liters = v; }, fhoro: function (v) { S.form.fhoro = v; }, notes: function (v) { S.form.notes = v; },
-  reqNote: function (v) { S.reqNote = v; }
+  reqNote: function (v) { S.reqNote = v; },
+  pa: function (v, el) { var p = S.form.prog[el.dataset.k] || (S.form.prog[el.dataset.k] = {}); p.a = v; },
+  pb: function (v, el) { var p = S.form.prog[el.dataset.k] || (S.form.prog[el.dataset.k] = {}); p.b = v; }
 };
 var onchange = {
   ffrom: function (v) { if (v) { S.f.from = v; loadSup(); } }, fto: function (v) { if (v) { S.f.to = v; loadSup(); } }, fm: function (v) { S.f.machine = v; render(); }
@@ -584,5 +660,5 @@ if (CFG.API_URL && CFG.API_KEY) {
   bp.then(function () { if (S.session && S.session.role === 'op') syncNow(); });
 } else hideSplash();
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, setCFG: function (c) { Object.assign(CFG, c); } };
+if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
 })();
