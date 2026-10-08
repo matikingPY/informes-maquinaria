@@ -161,3 +161,14 @@ select.inp-s{width:auto;text-align:left;font-family:var(--f-body)}
 .login .err{min-height:1.2em;font-size:.9375rem}
 .login .dots{margin:2px 0}
 @media (max-height:700px){.login .pad button{min-height:48px}.login .tabs2 button{min-height:40px}.login .docbox{min-height:52px}}
+
+/* pantalla de carga al abrir */
+#splash{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .4s}
+#splash.off{opacity:0;pointer-events:none}
+#splash img{width:min(66vw,260px);height:auto;display:block;animation:s-in .9s ease-out both}
+#splash .sbar{width:220px;height:8px;border-radius:99px;background:var(--track);overflow:hidden;margin-top:38px}
+#splash .sbar i{display:block;height:100%;background:var(--accent);border-radius:99px;animation:s-bar 2.4s ease-out infinite alternate}
+#splash p{margin:16px 0 0;font-size:1.125rem;font-weight:600;color:var(--muted)}
+@keyframes s-in{from{opacity:0;transform:scale(.86)}to{opacity:1;transform:scale(1)}}
+@keyframes s-bar{from{width:6%}60%{width:72%}to{width:94%}}
+@media (prefers-reduced-motion:reduce){#splash img,#splash .sbar i{animation:none}#splash .sbar i{width:60%}}

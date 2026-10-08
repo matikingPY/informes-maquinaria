@@ -572,7 +572,17 @@ window.addEventListener('offline', function () { soft(); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { syncNow(); if (S.view === 'login') refreshBootstrap(); } });
 setInterval(function () { if (S.session && S.session.role === 'op' && (mineQueue().length || S.net.lastErr)) syncNow(); }, 30000);
 render();
-if (CFG.API_URL && CFG.API_KEY) { refreshBootstrap().then(function () { if (S.session && S.session.role === 'op') syncNow(); }); }
+/* pantalla de carga: se va cuando la app ya tiene sus datos (mínimo 0,7 s para que no parpadee) */
+var splash = document.getElementById('splash'), splashT0 = Date.now();
+function hideSplash() {
+  var el = splash; if (!el) return; splash = null;
+  setTimeout(function () { try { el.classList.add('off'); setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 450); } catch (x) {} }, Math.max(0, 700 - (Date.now() - splashT0)));
+}
+if (CFG.API_URL && CFG.API_KEY) {
+  var bp = refreshBootstrap();
+  if (Object.keys(S.machines || {}).length) hideSplash(); else { bp.then(hideSplash); setTimeout(hideSplash, 8000); }
+  bp.then(function () { if (S.session && S.session.role === 'op') syncNow(); });
+} else hideSplash();
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
 if (window.__IED_TEST__) window.__IED_TEST__.hooks = { S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, setCFG: function (c) { Object.assign(CFG, c); } };
 })();
