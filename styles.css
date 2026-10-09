@@ -213,3 +213,6 @@ table.ex tr.xd td{background:var(--track);padding:12px 14px}
 .blk.off{opacity:.55}
 .dispnote{background:var(--bg);border:1px dashed var(--line2);border-radius:12px;padding:12px;color:var(--muted);font-size:.9375rem}
 [hidden]{display:none!important}
+
+.card.att .attrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 14px}.card.att .attrow b{display:block;font-size:1.5rem}
+.btn.att{background:var(--inkbg);border-color:var(--inkbg);color:#fff}

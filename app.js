@@ -20,6 +20,7 @@ var S = {
   login: newLogin('op'), form: null, last: null, f: null, sup: null, supLoading: false,
   reqPick: null, reqNote: '', showMiss: false, ex: { mode: 'maq', q: '', inf: 'all', tipo: 'all', open: null, shown: 15, sort: { maq: ['hours', -1], item: ['h', -1], op: ['hours', -1], av: ['date', -1] } }, hist: { opId: (saved.hist && saved.hist.opId) || '', list: (saved.hist && saved.hist.list) || [], at: (saved.hist && saved.hist.at) || '', range: '30', shown: 20, open: null, loading: false, err: '' }, boot: 'wait', net: { syncing: false, lastErr: '' }
 };
+S.marks = saved.marks || []; S.att = saved.att || { opId: '', date: '', entrada: '', salida: '' }; S.markBusy = false; S.markErr = '';
 if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
   if (CFG.REQUIRE_PIN_ON_OPEN) { S.pendingSession = saved.session; S.login.opId = saved.session.opId; S.login.step = 'pin'; }
   else { S.session = saved.session; S.view = 'opHome'; }
@@ -27,7 +28,7 @@ if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
 
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, catalog: S.catalog, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed, hist: { opId: S.hist.opId, list: S.hist.list, at: S.hist.at } }));
+    localStorage.setItem(LS, JSON.stringify({ machines: S.machines, catalog: S.catalog, operators: S.operators, known: S.known, shift: S.shift, session: S.session && S.session.role === 'op' ? S.session : (S.pendingSession || null), myReqs: S.myReqs, myReqsDate: S.myReqsDate, queue: S.queue, failed: S.failed, marks: S.marks, att: S.att, hist: { opId: S.hist.opId, list: S.hist.list, at: S.hist.at } }));
   } catch (e) {}
 }
 
@@ -87,12 +88,12 @@ var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
   bad_pin: 'PIN incorrecto', forbidden_role: 'Tu usuario no tiene acceso a esto.', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
   unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
-  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
+  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.', no_location: 'Hace falta la ubicación para marcar.', bad_mark: 'La marca no es válida.'
 };
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
 
 /* ---------- servidor ---------- */
-var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1, myReports: 1 }; // se pueden repetir sin riesgo
+var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1, myReports: 1, markAttendance: 1, myAttendance: 1 }; // se pueden repetir sin riesgo
 function api(action, payload) {
   var p = api1(action, payload);
   if (!SEGURAS[action]) return p;
@@ -143,7 +144,7 @@ function syncNow() {
     if (e && e.offline) S.net.lastErr = 'offline';
     else if (e && (e.error === 'bad_pin' || e.error === 'unknown_operator' || e.error === 'no_pin')) authLost(e);
     else S.net.lastErr = (e && e.error) || 'error';
-  }).then(function () { soft(); });
+  }).then(function () { return syncMarks(); }).then(function () { soft(); });
 }
 function authLost(e) {
   var id = S.session && S.session.opId;
@@ -154,7 +155,7 @@ function authLost(e) {
 
 /* ---------- pantallas ---------- */
 function netPill() {
-  var off = (typeof navigator.onLine === 'boolean' && !navigator.onLine) || S.net.lastErr === 'offline', n = S.session && S.session.role === 'op' ? mineQueue().length : 0, h = '';
+  var off = (typeof navigator.onLine === 'boolean' && !navigator.onLine) || S.net.lastErr === 'offline', n = S.session && S.session.role === 'op' ? mineQueue().length + mineMarks().length : 0, h = '';
   if (off) h += '<span class="pill warn"><i class="dot"></i>Sin señal</span>';
   if (n) h += '<span class="pill info">' + n + ' sin enviar</span>';
   return h ? '<span class="net">' + h + '</span>' : '';
@@ -288,6 +289,66 @@ function enterSup(opId, h, rol) {
   }).catch(function (e) { loginFail(e && e.offline ? 'Necesitás señal para entrar con este usuario.' : errMsg(e)); });
 }
 
+/* asistencia: marcar entrada y salida con la ubicación. La marca queda en el celular hasta que se envía. */
+var marksSyncing = false;
+function hhmm(ms) { var d = new Date(ms); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+function mineMarks() { return S.marks.filter(function (q) { return S.session && q.opId === S.session.opId; }); }
+function attToday() {
+  var a = { entrada: '', salida: '', pend: false }, id = S.session && S.session.opId, t = today();
+  if (S.att.opId === id && S.att.date === t) { a.entrada = S.att.entrada; a.salida = S.att.salida; }
+  mineMarks().forEach(function (q) {
+    if (q.date !== t) return;
+    a.pend = true;
+    if (q.tipo === 'entrada') { if (!a.entrada) a.entrada = hhmm(q.t); } else a.salida = hhmm(q.t);
+  });
+  return a;
+}
+var ATT_ERR = {
+  denied: 'No tenés la ubicación activada para esta app, y sin ubicación no se puede marcar. Activala (en Chrome: el candado de la barra de arriba > Permisos > Ubicación > Permitir) y tocá de nuevo.',
+  timeout: 'No pudimos encontrar tu ubicación. Revisá que el GPS esté prendido, salí a un lugar abierto y probá de nuevo.',
+  unavail: 'No pudimos encontrar tu ubicación. Revisá que el GPS esté prendido y probá de nuevo.',
+  nogeo: 'Este celular no permite usar la ubicación desde la app.'
+};
+function attCard() {
+  var a = attToday(), h = '<div class="card att"><div class="eyebrow">Asistencia de hoy</div><div class="attrow"><div><span class="muted small">Entrada</span><b class="mono">' + (a.entrada || '—') + '</b></div><div><span class="muted small">Salida</span><b class="mono">' + (a.salida || '—') + '</b></div></div>';
+  if (S.markErr) h += '<div class="callout" style="margin-bottom:12px">' + esc(ATT_ERR[S.markErr] || ATT_ERR.unavail) + '</div>';
+  var tipo = !a.entrada ? 'entrada' : (!a.salida ? 'salida' : '');
+  if (tipo) h += '<button class="btn att" data-act="mark" data-t="' + tipo + '"' + (S.markBusy ? ' disabled' : '') + '>' + (S.markBusy ? 'Buscando tu ubicación…' : 'Marcar ' + tipo) + '</button>';
+  else h += '<div class="muted small" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>Jornada marcada.</span><button class="link" data-act="mark" data-t="salida">Marcar salida otra vez</button></div>';
+  if (a.pend) h += '<div class="muted small" style="margin-top:10px">Sin enviar todavía: se envía sola cuando haya señal.</div>';
+  return h + '</div>';
+}
+function markNow(tipo) {
+  if (S.markBusy || !S.session || S.session.role !== 'op') return;
+  var a = attToday(); if (tipo === 'entrada' && a.entrada) return;
+  S.markErr = ''; S.markBusy = true; render();
+  if (!navigator.geolocation) { S.markBusy = false; S.markErr = 'nogeo'; render(); return; }
+  navigator.geolocation.getCurrentPosition(function (p) {
+    S.marks.push({ opId: S.session.opId, mid: uid(), tipo: tipo, t: Date.now(), date: today(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy });
+    S.markBusy = false; save(); render(); syncMarks();
+  }, function (err) {
+    S.markBusy = false; S.markErr = err && err.code === 1 ? 'denied' : (err && err.code === 3 ? 'timeout' : 'unavail'); render();
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+function syncMarks() {
+  if (!S.session || S.session.role !== 'op' || marksSyncing) return Promise.resolve();
+  var send = mineMarks().slice(0, 10), id = S.session.opId; marksSyncing = true;
+  var p = send.length ? api('markAttendance', { opId: id, pin: S.session.pinH, phoneNow: Date.now(), marks: send.map(function (q) { return { mid: q.mid, tipo: q.tipo, t: q.t, lat: q.lat, lng: q.lng, acc: q.acc }; }) })
+    : api('myAttendance', { opId: id, pin: S.session.pinH });
+  return p.then(function (res) {
+    var by = {}; (res.results || []).forEach(function (r) { by[r.mid] = r; });
+    send.forEach(function (q) { var r = by[q.mid]; if (!r) return; S.marks = S.marks.filter(function (x) { return x !== q; }); if (!r.ok) toast('No se pudo guardar tu marca de ' + q.tipo + ': ' + (ERR[r.error] || r.error)); });
+    S.att = { opId: id, date: res.serverDate, entrada: res.today.entrada, salida: res.today.salida };
+    marksSyncing = false; save(); soft();
+    if (send.length && mineMarks().length) return syncMarks();
+  }).catch(function (e) {
+    marksSyncing = false;
+    if (e && !e.offline && (e.error === 'bad_pin' || e.error === 'unknown_operator' || e.error === 'no_pin')) authLost(e);
+    else if (e && e.error === 'forbidden_role') { S.marks = S.marks.filter(function (x) { return x.opId !== id; }); save(); }
+    soft();
+  });
+}
+
 /* operador: inicio */
 function myReqs() { return S.myReqsDate === today() ? S.myReqs : []; }
 function opHome() {
@@ -296,6 +357,7 @@ function opHome() {
   var h = '<div class="stack"><div><div class="muted">' + esc(dfull(today())) + '</div><h1 class="big">Hola, ' + esc(op.name.split(' ')[0]) + '</h1></div>';
   if (q.length) h += '<div class="callout warn">Tenés ' + q.length + ' informe' + (q.length > 1 ? 's' : '') + ' sin enviar. Se envían solos cuando haya señal. <button class="link" data-act="syncnow">Enviar ahora</button></div>';
   fl.forEach(function (f) { h += '<div class="callout">No se pudo enviar el informe del ' + esc(dlong(f.r.date)) + ' de ' + esc(mcode(f.r.machineId)) + ': ' + esc(ERR[f.error] || f.error) + '. Avisale a tu supervisor. <button class="link" data-act="discard" data-id="' + esc(f.r.id) + '">Descartar</button></div>'; });
+  h += attCard();
   if (m) h += '<div class="mcard"><div class="mrow"><span class="eyebrow">Tu máquina</span><span class="mtype">' + esc(m.name) + '</span></div><div class="mrow"><div class="mcode">' + esc(m.code) + '</div>' + mIcon(m, true, 128) + '</div><div class="horo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6a60" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M12 3v2"/></svg><span>Último horómetro</span><b>' + (m.horo > 0 ? fmt(m.horo) : '—') + '</b></div></div><button class="btn primary" data-act="newForm" data-m="' + esc(m.id) + '">Cargar informe de hoy</button>';
   else h += '<div class="callout warn">No tenés una máquina asignada. Pedí autorización para la que vas a usar.</div>';
   myReqs().forEach(function (r) {
@@ -947,6 +1009,7 @@ var act = {
   disp: function (d) { var F = S.form; F.disp = d.v === '1'; F.nov = { t: '', sub: '', stop: '' }; if (F.disp) { F.works = []; F.pick = {}; F.prog = {}; F.hrs = {}; F.hrsEdited = false; F.hFin = ''; } render(); },
   dreason: function (d) { var N = S.form.nov; N.t = d.v; if (d.v !== 'averia') N.sub = ''; N.stop = ''; render(); },
   novsub: function (d) { S.form.nov.sub = d.v; if (S.form.disp) { render(); return; } var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); },
+  mark: function (d) { markNow(d.t); },
   syncnow: function () { toast('Enviando…'); syncNow(); },
   discard: function (d) { S.failed = S.failed.filter(function (f) { return f.r.id !== d.id; }); save(); render(); },
   otra: function () { S.reqPick = null; S.reqNote = ''; go('otra'); },
@@ -1014,7 +1077,7 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
 window.addEventListener('online', function () { S.net.lastErr = ''; syncNow(); refreshBootstrap(); });
 window.addEventListener('offline', function () { soft(); });
 document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { syncNow(); if (S.view === 'login') refreshBootstrap(); } });
-setInterval(function () { if (S.session && S.session.role === 'op' && (mineQueue().length || S.net.lastErr)) syncNow(); }, 30000);
+setInterval(function () { if (S.session && S.session.role === 'op' && (mineQueue().length || mineMarks().length || S.net.lastErr)) syncNow(); }, 30000);
 render();
 /* pantalla de carga: se va cuando la app ya tiene sus datos (mínimo 0,7 s para que no parpadee) */
 var splash = document.getElementById('splash'), splashT0 = Date.now();
@@ -1028,5 +1091,5 @@ if (CFG.API_URL && CFG.API_KEY) {
   bp.then(function () { if (S.session && S.session.role === 'op') syncNow(); });
 } else hideSplash();
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-if (window.__IED_TEST__) window.__IED_TEST__.hooks = { novText: novText, S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
+if (window.__IED_TEST__) window.__IED_TEST__.hooks = { markNow: markNow, syncMarks: syncMarks, attToday: attToday, novText: novText, S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
 })();
