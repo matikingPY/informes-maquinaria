@@ -85,7 +85,7 @@ function mIcon(m, dark, w) {
 }
 var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
-  bad_pin: 'PIN incorrecto', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
+  bad_pin: 'PIN incorrecto', forbidden_role: 'Tu usuario no tiene acceso a esto.', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
   unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
   bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.'
 };
@@ -162,7 +162,7 @@ function netPill() {
 function header() {
   var who = '';
   if (S.session && S.session.role === 'op') { var o = S.operators[S.session.opId]; who = '<div class="who">' + netPill() + '<b>' + esc(o ? o.name : '') + '</b><button class="link" data-act="logout">Salir</button></div>'; }
-  if (S.session && S.session.role === 'sup') who = '<div class="who"><b>Supervisor</b><button class="link" data-act="logout">Salir</button></div>';
+  if (S.session && (S.session.role === 'sup' || S.session.role === 'staff')) { var p = S.operators[S.session.opId]; who = '<div class="who"><b>' + esc(p ? p.name : '') + '</b><span class="muted small">' + esc(ROL_N[S.session.rol] || '') + '</span><button class="link" data-act="logout">Salir</button></div>'; }
   return '<div class="topin"><picture><source media="(prefers-color-scheme: dark)" srcset="icons/logo-dark.png"><img class="logo" src="icons/logo.png" alt="WheelCo"></picture>' + who + '</div>';
 }
 function render() {
@@ -176,6 +176,7 @@ function render() {
   else if (S.view === 'done') body = doneView();
   else if (S.view === 'hist') body = histView();
   else if (S.view === 'sup') body = supView();
+  else if (S.view === 'staff') body = staffView();
   topEl.innerHTML = header(); app.innerHTML = body;
   if (S.view === 'form') liveUpdate();
 }
@@ -200,8 +201,7 @@ function padHTML(extra) {
 }
 function loginView() {
   var L = S.login, h = '<div class="stack login">';
-  if ((L.role === 'op' && L.step === 'doc') || L.role === 'sup') h += '<div class="tabs2"><button data-act="role" data-r="op" aria-pressed="' + (L.role === 'op') + '">Soy operador</button><button data-act="role" data-r="sup" aria-pressed="' + (L.role === 'sup') + '">Supervisor</button></div>';
-  if (L.role === 'op' && L.step === 'doc') {
+  if (L.step === 'doc') {
     h += '<h1 class="big" style="text-align:center">Tu número de cédula</h1>';
     h += '<div class="docbox" aria-live="polite">' + (L.doc ? esc(fmtDoc(L.doc)) : '<span class="muted">Escribilo acá</span>') + '</div>';
     h += '<div class="err">' + (L.busy ? '<span class="muted">Buscando…</span>' : esc(L.err)) + '</div>';
@@ -210,8 +210,7 @@ function loginView() {
     if (installEv) h += '<button class="link" data-act="install" style="align-self:center">Instalar la app en este celular</button>';
   } else {
     var title, sub = '';
-    if (L.role === 'sup') title = 'PIN de supervisor';
-    else {
+    {
       var op = S.operators[L.opId];
       if (!op) { L.step = 'doc'; L.opId = null; return loginView(); }
       if (!op.hasPin && !(S.pendingSession && S.pendingSession.opId === op.id)) { title = L.first ? 'Repetí tu PIN' : 'Creá tu PIN'; sub = op.name + '. Elegí 4 números que recuerdes. Lo vas a usar siempre para entrar.'; }
@@ -237,7 +236,7 @@ function docDone() {
   api('identify', { doc: doc }).then(function (res) {
     applyMachines(res.machines); applyCatalog(res.catalog); S.shift = res.shiftHours || 9;
     var op = res.operator, old = S.operators[op.id] || {};
-    S.operators[op.id] = Object.assign({}, old, { id: op.id, name: op.name, machineId: op.machineId, hasPin: op.hasPin });
+    S.operators[op.id] = Object.assign({}, old, { id: op.id, name: op.name, machineId: op.machineId, hasPin: op.hasPin, role: op.role || 'operador' });
     S.known[doc] = op.id; save();
     L.opId = op.id; L.step = 'pin'; L.pin = ''; L.first = null; L.busy = false; render();
   }).catch(function (e) {
@@ -252,7 +251,6 @@ function docDone() {
 }
 function pinDone() {
   var L = S.login;
-  if (L.role === 'sup') { supLogin(L.pin); return; }
   var op = S.operators[L.opId]; if (!op) return;
   L.busy = true; render();
   sha(op.id + ':' + L.pin + SAL).then(function (h) {
@@ -275,9 +273,19 @@ function pinDone() {
   }, function (e) { loginFail(errMsg(e)); });
 }
 function enterAs(opId, h) {
-  S.session = { role: 'op', opId: opId, pinH: h }; S.pendingSession = null; save();
+  var rol = (S.operators[opId] && S.operators[opId].role) || 'operador';
+  S.pendingSession = null;
+  if (rol === 'division' || rol === 'ingeniero') { enterSup(opId, h, rol); return; }
+  if (rol === 'encargado' || rol === 'tthh') { S.session = { role: 'staff', opId: opId, pinH: h, rol: rol }; S.login = newLogin('op'); go('staff'); return; }
+  S.session = { role: 'op', opId: opId, pinH: h, rol: 'operador' }; save();
   S.login = newLogin('op');
   go('opHome'); syncNow();
+}
+function enterSup(opId, h, rol) {
+  var L = S.login; S.f = { from: addDays(today(), -29), to: today(), machine: 'all' };
+  api('supData', { opId: opId, pin: h, from: S.f.from, to: S.f.to }).then(function (res) {
+    S.session = { role: 'sup', opId: opId, pinH: h, rol: rol }; S.sup = res; S.login = newLogin('op'); go('sup');
+  }).catch(function (e) { loginFail(e && e.offline ? 'Necesitás señal para entrar con este usuario.' : errMsg(e)); });
 }
 
 /* operador: inicio */
@@ -357,6 +365,7 @@ function formHTML() {
   h += '<div id="errs"></div><button class="btn primary" id="send" data-act="send">Enviar informe</button></div>';
   return h;
 }
+var ROL_N = { operador: 'Operador', division: 'División de Equipos y Maquinaria', encargado: 'Encargado de producción', tthh: 'TTHH · Talento Humano', ingeniero: 'Ingeniero Residente' };
 var NOVS = [['', 'Sin novedad'], ['averia', 'Falla mecánica'], ['lluvia', 'Parada por lluvia'], ['material', 'Falta de material'], ['otra', 'Otra']];
 var NOV_N = { averia: 'Falla mecánica', lluvia: 'Parada por lluvia', material: 'Falta de material', otra: 'Otra novedad' };
 var AVS = [['motor', 'Motor'], ['hidraulico', 'Hidráulico'], ['neumaticos', 'Neumáticos'], ['electrico', 'Eléctrico'], ['otra', 'Otra falla']];
@@ -652,16 +661,13 @@ function downloadBlob(blob, name) {
 }
 
 /* ---------- supervisor ---------- */
-function supLogin(pin) {
-  var L = S.login; L.busy = true; render();
-  S.f = { from: addDays(today(), -29), to: today(), machine: 'all' };
-  sha('sup:' + pin + SAL).then(function (h) {
-    return api('supData', { pin: h, from: S.f.from, to: S.f.to }).then(function (res) { S.session = { role: 'sup', pinH: h }; S.sup = res; L.busy = false; L.pin = ''; go('sup'); });
-  }).catch(function (e) { loginFail(e && e.offline ? 'Necesitás señal para entrar como supervisor.' : errMsg(e)); });
+function staffView() {
+  var rol = S.session && S.session.rol, p = S.session && S.operators[S.session.opId];
+  return '<div class="stack"><div><div class="muted">' + esc(ROL_N[rol] || '') + '</div><h1 class="big">Hola, ' + esc(p ? p.name.split(' ')[0] : '') + '</h1></div><div class="callout">Ya entraste con tu usuario. Las herramientas de tu rol se están terminando y van a aparecer acá.</div></div>';
 }
 function loadSup() {
   S.supLoading = true; render();
-  api('supData', { pin: S.session.pinH, from: S.f.from, to: S.f.to }).then(function (res) { S.sup = res; S.supLoading = false; render(); })
+  api('supData', { opId: S.session.opId, pin: S.session.pinH, from: S.f.from, to: S.f.to }).then(function (res) { S.sup = res; S.supLoading = false; render(); })
     .catch(function (e) { S.supLoading = false; render(); toast(e && e.offline ? 'Sin señal: no se pudo actualizar.' : errMsg(e)); });
 }
 function supFail(e) { toast(e && e.offline ? 'Sin señal: no se pudo guardar.' : errMsg(e)); }
@@ -978,8 +984,8 @@ var act = {
   exsort: function (d) { var s = S.ex.sort[S.ex.mode]; if (s[0] === d.k) s[1] = -s[1]; else { s[0] = d.k; s[1] = /^(label|code|name|mach|inf|op|notes|date)$/.test(d.k) && d.k !== 'date' ? 1 : -1; } exRefresh(); },
   exmore: function () { S.ex.shown += 15; exRefresh(); },
   excsv: exCsv,
-  valid: function (d) { api('supValidate', { pin: S.session.pinH, id: d.id }).then(function () { S.sup.reports.forEach(function (r) { if (r.id === d.id) r.status = 'ok'; }); render(); }).catch(supFail); },
-  decide: function (d) { api('supRequest', { pin: S.session.pinH, id: d.id, status: d.v }).then(function () { S.sup.requests.forEach(function (r) { if (r.id === d.id) r.status = d.v; }); render(); }).catch(supFail); }
+  valid: function (d) { api('supValidate', { opId: S.session.opId, pin: S.session.pinH, id: d.id }).then(function () { S.sup.reports.forEach(function (r) { if (r.id === d.id) r.status = 'ok'; }); render(); }).catch(supFail); },
+  decide: function (d) { api('supRequest', { opId: S.session.opId, pin: S.session.pinH, id: d.id, status: d.v }).then(function () { S.sup.requests.forEach(function (r) { if (r.id === d.id) r.status = d.v; }); render(); }).catch(supFail); }
 };
 var inp = {
   date: function (v) { S.form.date = v; },
