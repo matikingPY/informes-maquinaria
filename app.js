@@ -20,6 +20,7 @@ var S = {
   login: newLogin('op'), form: null, last: null, f: null, sup: null, supLoading: false,
   reqPick: null, reqNote: '', showMiss: false, ex: { mode: 'maq', q: '', inf: 'all', tipo: 'all', open: null, shown: 15, sort: { maq: ['hours', -1], item: ['h', -1], op: ['hours', -1], av: ['date', -1] } }, hist: { opId: (saved.hist && saved.hist.opId) || '', list: (saved.hist && saved.hist.list) || [], at: (saved.hist && saved.hist.at) || '', range: '30', shown: 20, open: null, loading: false, err: '' }, boot: 'wait', net: { syncing: false, lastErr: '' }
 };
+S.ot = { data: null, loading: false, err: '', screen: 'home', step: 1, busy: false, showPrev: false, f: null };
 S.marks = saved.marks || []; S.att = saved.att || { opId: '', date: '', entrada: '', salida: '' }; S.markBusy = false; S.markErr = '';
 if (saved.session && saved.session.opId && S.operators[saved.session.opId]) {
   if (CFG.REQUIRE_PIN_ON_OPEN) { S.pendingSession = saved.session; S.login.opId = saved.session.opId; S.login.step = 'pin'; }
@@ -88,12 +89,12 @@ var ERR = {
   forbidden: 'La clave de la app no coincide con la planilla. Avisale al administrador.', not_configured: 'La app todavía no está conectada a la planilla.',
   bad_pin: 'PIN incorrecto', forbidden_role: 'Tu usuario no tiene acceso a esto.', locked: 'Demasiados intentos. Esperá 10 minutos.', no_pin: 'Todavía no tenés PIN.', pin_exists: 'Ese operador ya tiene PIN. Pedile al supervisor que lo restablezca.',
   unknown_operator: 'Ese operador no está habilitado.', unknown_doc: 'No encontramos ese documento. Revisalo o avisale a tu supervisor.', unknown_machine: 'La máquina ya no está habilitada', bad_hours: 'Horómetros inválidos', bad_items: 'Las horas por trabajo no coinciden',
-  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.', no_location: 'Hace falta la ubicación para marcar.', bad_mark: 'La marca no es válida.'
+  bad_date: 'Fecha inválida', bad_prog: 'Progresivas inválidas', bad_nov: 'La novedad no es válida', bad_fuel: 'Datos de combustible inválidos', bad_id: 'Identificador inválido', no_crypto: 'Abrí la app desde su dirección https.', own_machine: 'Esa ya es tu máquina.', no_location: 'Hace falta la ubicación para marcar.', bad_mark: 'La marca no es válida.', bad_time: 'La hora tiene que ser después del fin de la jornada y hasta las 23:00.'
 };
 function errMsg(e) { if (e && e.offline) return 'Sin señal'; return ERR[e && e.error] || ('Error del servidor' + (e && e.error ? ' (' + e.error + ')' : '')); }
 
 /* ---------- servidor ---------- */
-var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1, myReports: 1, markAttendance: 1, myAttendance: 1 }; // se pueden repetir sin riesgo
+var SEGURAS = { identify: 1, bootstrap: 1, sync: 1, supData: 1, myReports: 1, markAttendance: 1, myAttendance: 1, otData: 1, otAuthorize: 1, otCancel: 1 }; // se pueden repetir sin riesgo
 function api(action, payload) {
   var p = api1(action, payload);
   if (!SEGURAS[action]) return p;
@@ -277,7 +278,7 @@ function enterAs(opId, h) {
   var rol = (S.operators[opId] && S.operators[opId].role) || 'operador';
   S.pendingSession = null;
   if (rol === 'division' || rol === 'ingeniero') { enterSup(opId, h, rol); return; }
-  if (rol === 'encargado' || rol === 'tthh') { S.session = { role: 'staff', opId: opId, pinH: h, rol: rol }; S.login = newLogin('op'); go('staff'); return; }
+  if (rol === 'encargado' || rol === 'tthh') { S.session = { role: 'staff', opId: opId, pinH: h, rol: rol }; S.login = newLogin('op'); S.ot.data = null; S.ot.screen = 'home'; go('staff'); if (rol === 'encargado') loadOt(); return; }
   S.session = { role: 'op', opId: opId, pinH: h, rol: 'operador' }; save();
   S.login = newLogin('op');
   go('opHome'); syncNow();
@@ -311,6 +312,7 @@ var ATT_ERR = {
 };
 function attCard() {
   var a = attToday(), h = '<div class="card att"><div class="eyebrow">Asistencia de hoy</div><div class="attrow"><div><span class="muted small">Entrada</span><b class="mono">' + (a.entrada || '—') + '</b></div><div><span class="muted small">Salida</span><b class="mono">' + (a.salida || '—') + '</b></div></div>';
+  if (S.att.ot && S.att.opId === (S.session && S.session.opId) && S.att.date === today()) h += '<div class="callout ok" style="margin-bottom:12px"><b>Horas extras de hoy:</b> autorizadas hasta las ' + esc(S.att.ot.hasta) + (S.att.ot.trabajo ? ' · ' + esc(S.att.ot.trabajo) : '') + '</div>';
   if (S.markErr) h += '<div class="callout" style="margin-bottom:12px">' + esc(ATT_ERR[S.markErr] || ATT_ERR.unavail) + '</div>';
   var tipo = !a.entrada ? 'entrada' : (!a.salida ? 'salida' : '');
   if (tipo) h += '<button class="btn att" data-act="mark" data-t="' + tipo + '"' + (S.markBusy ? ' disabled' : '') + '>' + (S.markBusy ? 'Buscando tu ubicación…' : 'Marcar ' + tipo) + '</button>';
@@ -338,7 +340,7 @@ function syncMarks() {
   return p.then(function (res) {
     var by = {}; (res.results || []).forEach(function (r) { by[r.mid] = r; });
     send.forEach(function (q) { var r = by[q.mid]; if (!r) return; S.marks = S.marks.filter(function (x) { return x !== q; }); if (!r.ok) toast('No se pudo guardar tu marca de ' + q.tipo + ': ' + (ERR[r.error] || r.error)); });
-    S.att = { opId: id, date: res.serverDate, entrada: res.today.entrada, salida: res.today.salida };
+    S.att = { opId: id, date: res.serverDate, entrada: res.today.entrada, salida: res.today.salida, ot: res.overtime || null };
     marksSyncing = false; save(); soft();
     if (send.length && mineMarks().length) return syncMarks();
   }).catch(function (e) {
@@ -346,6 +348,118 @@ function syncMarks() {
     if (e && !e.offline && (e.error === 'bad_pin' || e.error === 'unknown_operator' || e.error === 'no_pin')) authLost(e);
     else if (e && e.error === 'forbidden_role') { S.marks = S.marks.filter(function (x) { return x.opId !== id; }); save(); }
     soft();
+  });
+}
+
+/* encargado de producción: autorizar horas extras */
+var OT_SEM = ['19:00', '20:00', '21:00', '22:00', '23:00'], OT_DOM = ['14:00', '16:00', '18:00', '20:00', '22:00'];
+function otDate() { return S.ot.data ? S.ot.data.serverDate : today(); }
+function otDom() { return new Date(otDate() + 'T12:00:00').getDay() === 0; }
+function otNew() { S.ot.f = { until: otDom() ? '16:00' : '21:00', other: false, mode: 'tipo', types: {}, q: '', picked: {}, work: '', workOther: false, workText: '', stretch: '', note: '', rid: uid() }; S.ot.screen = 'new'; S.ot.step = 1; S.ot.busy = false; }
+function loadOt() {
+  S.ot.loading = true; S.ot.err = ''; render();
+  return api('otData', { opId: S.session.opId, pin: S.session.pinH }).then(function (res) { S.ot.data = res; S.ot.loading = false; render(); })
+    .catch(function (e) { S.ot.loading = false; if (e && e.error === 'bad_pin') { authLost(e); render(); return; } S.ot.err = e && e.offline ? 'Sin señal. Necesitás conexión para ver y autorizar horas extras.' : errMsg(e); render(); });
+}
+function norm(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function otAuthsDay(date, status) { return (S.ot.data ? S.ot.data.auths : []).filter(function (a) { return a.date === date && (!status || a.status === status); }); }
+function otGroups(list) { var g = {}, o = []; list.forEach(function (a) { if (!g[a.lote]) { g[a.lote] = { lote: a.lote, items: [], hasta: a.hasta, work: a.work, stretch: a.stretch, by: a.by, at: a.at }; o.push(g[a.lote]); } g[a.lote].items.push(a); }); return o; }
+function otPeople() { return S.ot.data ? S.ot.data.people : []; }
+function otAlready(id) { var r = null; otAuthsDay(otDate(), 'vigente').forEach(function (a) { if (a.personId === id) r = a; }); return r; }
+function otFiltered() {
+  var F = S.ot.f, q = norm(F.q), list = otPeople().slice();
+  if (F.mode === 'tipo') { var any = Object.keys(F.types).length; list = list.filter(function (p) { return any && p.type && F.types[p.type]; }); list.sort(function (a, b) { return a.code.localeCompare(b.code, 'es', { numeric: true }); }); }
+  else if (F.mode === 'cod') { list = list.filter(function (p) { return !q || norm(p.code).indexOf(q) > -1; }); list.sort(function (a, b) { return a.code.localeCompare(b.code, 'es', { numeric: true }); }); }
+  else { list = list.filter(function (p) { return !q || norm(p.name).indexOf(q) > -1; }); list.sort(function (a, b) { return a.name.localeCompare(b.name, 'es'); }); }
+  return list;
+}
+function otListHTML() {
+  var F = S.ot.f, list = otFiltered(), h = '';
+  if (F.mode === 'tipo' && !Object.keys(F.types).length) return '<p class="muted small" style="margin:0">Elegí uno o más tipos de máquina.</p>';
+  if (!list.length) return '<p class="muted small" style="margin:0">No hay nadie con ese filtro.</p>';
+  var all = list.every(function (p) { return F.picked[p.id]; });
+  h += '<div style="display:flex;justify-content:space-between;align-items:center"><span class="muted small">' + list.length + (list.length === 1 ? ' persona' : ' personas') + '</span><button class="link" data-act="otall">' + (all ? 'Quitar todas' : 'Elegir todas') + '</button></div>';
+  list.forEach(function (p) {
+    var a = otAlready(p.id);
+    h += '<button class="prow" data-act="otpick" data-id="' + esc(p.id) + '" aria-pressed="' + !!F.picked[p.id] + '"><span class="pbox"></span><span class="pcode mono">' + esc(p.code || '—') + '</span><span class="pname">' + esc(p.name) + '</span>' + (a ? '<span class="pill ok">Ya hasta ' + esc(a.hasta) + '</span>' : '') + '</button>';
+  });
+  return h;
+}
+function otListRefresh() { var el = document.getElementById('otlist'); if (el) el.innerHTML = otListHTML(); var b = document.getElementById('otbar'); if (b) b.innerHTML = otBarHTML(); var nx = document.getElementById('otnext'); if (nx) nx.disabled = !Object.keys(S.ot.f.picked).length; }
+function otBarHTML() { var n = Object.keys(S.ot.f.picked).length; return '<span>' + n + (n === 1 ? ' elegida' : ' elegidas') + '</span><span>hasta las ' + esc(S.ot.f.until) + '</span>'; }
+function otProg(n) { return '<div class="prog3">' + [1, 2, 3].map(function (i) { return '<i' + (i <= n ? ' class="on"' : '') + '></i>'; }).join('') + '</div>'; }
+function otView() {
+  var d = S.ot.data, h = '<div class="stack">';
+  if (S.ot.screen === 'new' && S.ot.f) return otNewView();
+  h += '<div><div class="muted">' + esc(d ? dfull(d.serverDate) : dfull(today())) + '</div><h1 class="big">Horas extras</h1></div>';
+  if (S.ot.err) h += '<div class="callout">' + esc(S.ot.err) + ' <button class="link" data-act="otrefresh">Reintentar</button></div>';
+  if (!d) return h + (S.ot.loading ? '<p class="muted">Cargando…</p>' : '') + '</div>';
+  var hoy = otAuthsDay(d.serverDate, 'vigente'), grupos = otGroups(hoy);
+  h += '<div class="mcard"><span class="eyebrow">Autorizado para hoy</span><div style="font-size:1.75rem;font-weight:700;line-height:1.15">' + (hoy.length ? hoy.length + (hoy.length === 1 ? ' persona' : ' personas') + ' con horas extras' : 'Todavía no autorizaste a nadie') + '</div></div>';
+  h += '<button class="btn primary" data-act="otnew">+ Nueva autorización</button>';
+  if (grupos.length) h += '<div class="eyebrow" style="margin-top:6px">Autorizaciones de hoy</div>';
+  grupos.forEach(function (g) {
+    var ids = g.items.map(function (a) { return a.id; }).join(',');
+    h += '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>' + esc(g.work || 'Horas extras') + '</b><span class="pill ok">Hasta las ' + esc(g.hasta) + '</span></div>';
+    if (g.stretch) h += '<div class="muted small">' + esc(g.stretch) + '</div>';
+    g.items.forEach(function (a) { h += '<div class="otline"><span class="mono">' + esc(a.code || '—') + '</span><span>' + esc(a.personName) + '</span><button class="link" data-act="otcancel" data-ids="' + esc(a.id) + '">Quitar</button></div>'; });
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span class="muted small">Autorizó ' + esc(g.by) + ' a las ' + esc(hhmm(new Date(g.at).getTime())) + '</span>' + (g.items.length > 1 ? '<button class="link" data-act="otcancel" data-ids="' + esc(ids) + '">Cancelar todo</button>' : '') + '</div></div>';
+  });
+  var prev = d.auths.filter(function (a) { return a.date !== d.serverDate; });
+  if (prev.length) {
+    h += '<button class="btn" data-act="otprev">' + (S.ot.showPrev ? 'Ocultar días anteriores' : 'Ver días anteriores') + '</button>';
+    if (S.ot.showPrev) {
+      var dias = {}; prev.forEach(function (a) { (dias[a.date] = dias[a.date] || []).push(a); });
+      Object.keys(dias).sort().reverse().forEach(function (dt) {
+        h += '<div class="card"><b>' + esc(dlong(dt)) + '</b>';
+        otGroups(dias[dt]).forEach(function (g) { var v = g.items.filter(function (a) { return a.status === 'vigente'; }).length; h += '<div class="muted small">Hasta las ' + esc(g.hasta) + ' · ' + g.items.length + ' ' + (g.items.length === 1 ? 'persona' : 'personas') + (g.work ? ' · ' + esc(g.work) : '') + (v < g.items.length ? ' · ' + (g.items.length - v) + ' sin efecto' : '') + '</div>'; });
+        h += '</div>';
+      });
+    }
+  }
+  h += '<button class="link" data-act="otrefresh" style="align-self:center">Actualizar</button>';
+  return h + '</div>';
+}
+function otNewView() {
+  var F = S.ot.f, step = S.ot.step, h = '<div class="stack"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:1.125rem">Nueva autorización</b><button class="link" data-act="otback" data-all="1">Cancelar</button></div>' + otProg(step);
+  var picked = otPeople().filter(function (p) { return F.picked[p.id]; });
+  if (step === 1) {
+    var horas = otDom() ? OT_DOM : OT_SEM;
+    h += '<h2 style="margin:4px 0 0;font-size:1.25rem">¿Hasta qué hora?</h2><div class="tgl">' + horas.map(function (x) { return '<button class="tg" data-act="otuntil" data-v="' + x + '" aria-pressed="' + (!F.other && F.until === x) + '">' + x + '</button>'; }).join('') + '<button class="tg" data-act="otuntil" data-v="other" aria-pressed="' + F.other + '">Otra…</button></div>';
+    if (F.other) h += '<label class="fld">Hora (hasta las 23:00)<input class="txt" type="time" id="ot-until" data-in="otuntil" max="23:00" value="' + esc(F.until) + '"></label>';
+    h += '<h2 style="margin:8px 0 0;font-size:1.25rem">¿Cómo querés elegir?</h2><div class="tgl">' + [['tipo', 'Por tipo'], ['op', 'Por operador'], ['cod', 'Por código']].map(function (x) { return '<button class="tg" data-act="otmode" data-v="' + x[0] + '" aria-pressed="' + (F.mode === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (F.mode === 'tipo') {
+      var tipos = {}; otPeople().forEach(function (p) { if (p.type) tipos[p.type] = 1; });
+      h += '<div class="tgl">' + Object.keys(tipos).sort().map(function (t) { return '<button class="tg" data-act="ottype" data-v="' + esc(t) + '" aria-pressed="' + !!F.types[t] + '">' + esc(t) + '</button>'; }).join('') + '</div>';
+    } else h += '<input class="txt" id="ot-q" data-in="otq" autocomplete="off" placeholder="' + (F.mode === 'cod' ? 'Buscar por código (ej: VC-012)' : 'Buscar por nombre') + '" value="' + esc(F.q) + '">';
+    h += '<div class="stack tight" id="otlist">' + otListHTML() + '</div><div class="otbar" id="otbar">' + otBarHTML() + '</div><button class="btn primary" id="otnext" data-act="otnext"' + (picked.length ? '' : ' disabled') + '>Siguiente</button>';
+  } else if (step === 2) {
+    var infs = {}; picked.forEach(function (p) { if (p.inf) infs[p.inf] = 1; });
+    var vistos = {}, works = (S.ot.data.works || []).filter(function (w) { if (!infs[w.inf] || vistos[w.name]) return false; vistos[w.name] = 1; return true; });
+    h += '<h2 style="margin:4px 0 0;font-size:1.25rem">¿Qué van a hacer?</h2><p class="muted small" style="margin:0">Es opcional. Sirve para dejar anotado el motivo de las horas extras.</p><div class="tgl">' + works.map(function (w) { return '<button class="tg" data-act="otwork" data-v="' + esc(w.name) + '" aria-pressed="' + (!F.workOther && F.work === w.name) + '">' + esc(w.name) + '</button>'; }).join('') + '<button class="tg" data-act="otwork" data-v="__otro" aria-pressed="' + F.workOther + '">Otro</button></div>';
+    if (F.workOther) h += '<input class="txt" id="ot-wt" data-in="otwork" maxlength="120" placeholder="¿Qué trabajo?" value="' + esc(F.workText) + '">';
+    h += '<label class="fld">Frente / tramo (opcional)<input class="txt" data-in="otstretch" maxlength="120" placeholder="Ej: Tramo 3 · prog. 12+400 a 13+200" value="' + esc(F.stretch) + '"></label><label class="fld">Motivo (opcional)<textarea class="txt" data-in="otnote" maxlength="300" placeholder="Ej: Hay que terminar la capa antes de la lluvia">' + esc(F.note) + '</textarea></label>';
+    h += '<button class="btn primary" data-act="otnext">Siguiente</button><button class="btn" data-act="otback">← Atrás</button>';
+  } else {
+    var ya = picked.filter(function (p) { return otAlready(p.id); }).length, trabajo = F.workOther ? F.workText.trim() : F.work;
+    h += '<div class="mcard"><span class="eyebrow">Hoy · ' + esc(dfull(otDate())) + '</span><div style="font-size:1.75rem;font-weight:700;line-height:1.15">Horas extras hasta las ' + esc(F.until) + '</div></div>';
+    picked.forEach(function (p) { h += '<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b class="mono">' + esc(p.code || '—') + '</b><span style="text-align:right">' + esc(p.name) + '</span></div>'; });
+    if (trabajo || F.stretch || F.note) h += '<div class="muted small">' + [trabajo, F.stretch, F.note].filter(Boolean).map(esc).join(' · ') + '</div>';
+    if (ya) h += '<div class="callout warn">' + ya + (ya === 1 ? ' persona ya tenía' : ' personas ya tenían') + ' horas extras autorizadas hoy: la nueva autorización las reemplaza.</div>';
+    h += '<div class="callout">Solo se les cuentan horas extras <b>hasta las ' + esc(F.until) + '</b>, aunque marquen la salida más tarde. Queda anotado quién autorizó y cuándo.</div>';
+    h += '<button class="btn primary" data-act="otsend"' + (S.ot.busy ? ' disabled' : '') + '>' + (S.ot.busy ? 'Autorizando…' : 'Autorizar horas extras') + '</button><button class="btn" data-act="otback"' + (S.ot.busy ? ' disabled' : '') + '>← Atrás</button>';
+  }
+  return h + '</div>';
+}
+function otSend() {
+  var F = S.ot.f; if (S.ot.busy) return;
+  var ids = Object.keys(F.picked); if (!ids.length) return;
+  S.ot.busy = true; render();
+  api('otAuthorize', { opId: S.session.opId, pin: S.session.pinH, rid: F.rid, until: F.until, people: ids, work: F.workOther ? F.workText.trim() : F.work, stretch: F.stretch.trim(), note: F.note.trim() }).then(function (res) {
+    S.ot.busy = false; S.ot.screen = 'home'; S.ot.f = null; toast('Autorizado: ' + (res.created || ids.length) + (ids.length === 1 ? ' persona.' : ' personas.')); loadOt();
+  }).catch(function (e) {
+    S.ot.busy = false; if (e && e.error === 'bad_pin') { authLost(e); render(); return; }
+    render(); toast(e && e.offline ? 'Sin señal: no se autorizó. Probá de nuevo cuando haya.' : errMsg(e));
   });
 }
 
@@ -725,6 +839,7 @@ function downloadBlob(blob, name) {
 /* ---------- supervisor ---------- */
 function staffView() {
   var rol = S.session && S.session.rol, p = S.session && S.operators[S.session.opId];
+  if (rol === 'encargado') return otView();
   return '<div class="stack"><div><div class="muted">' + esc(ROL_N[rol] || '') + '</div><h1 class="big">Hola, ' + esc(p ? p.name.split(' ')[0] : '') + '</h1></div><div class="callout">Ya entraste con tu usuario. Las herramientas de tu rol se están terminando y van a aparecer acá.</div></div>';
 }
 function loadSup() {
@@ -1009,6 +1124,22 @@ var act = {
   disp: function (d) { var F = S.form; F.disp = d.v === '1'; F.nov = { t: '', sub: '', stop: '' }; if (F.disp) { F.works = []; F.pick = {}; F.prog = {}; F.hrs = {}; F.hrsEdited = false; F.hFin = ''; } render(); },
   dreason: function (d) { var N = S.form.nov; N.t = d.v; if (d.v !== 'averia') N.sub = ''; N.stop = ''; render(); },
   novsub: function (d) { S.form.nov.sub = d.v; if (S.form.disp) { render(); return; } var el = document.getElementById('novblk'); if (el) el.innerHTML = novHTML(); },
+  otnew: function () { otNew(); render(); },
+  otback: function (d) { if (d.all || S.ot.step <= 1) { S.ot.screen = 'home'; S.ot.f = null; } else S.ot.step--; render(); },
+  otnext: function () { if (S.ot.step === 1 && !Object.keys(S.ot.f.picked).length) return; if (S.ot.step < 3) { S.ot.step++; window.scrollTo(0, 0); render(); } },
+  otuntil: function (d) { var F = S.ot.f; if (d.v === 'other') { F.other = true; } else { F.other = false; F.until = d.v; } render(); },
+  otmode: function (d) { S.ot.f.mode = d.v; S.ot.f.q = ''; render(); },
+  ottype: function (d) { var t = S.ot.f.types; if (t[d.v]) delete t[d.v]; else t[d.v] = true; render(); },
+  otpick: function (d) { var p = S.ot.f.picked; if (p[d.id]) delete p[d.id]; else p[d.id] = true; otListRefresh(); },
+  otall: function () { var F = S.ot.f, list = otFiltered(), all = list.every(function (p) { return F.picked[p.id]; }); list.forEach(function (p) { if (all) delete F.picked[p.id]; else F.picked[p.id] = true; }); otListRefresh(); },
+  otwork: function (d) { var F = S.ot.f; if (d.v === '__otro') { F.workOther = !F.workOther; if (F.workOther) F.work = ''; } else { F.workOther = false; F.work = F.work === d.v ? '' : d.v; } render(); },
+  otsend: otSend,
+  otprev: function () { S.ot.showPrev = !S.ot.showPrev; render(); },
+  otrefresh: function () { loadOt(); },
+  otcancel: function (d) {
+    api('otCancel', { opId: S.session.opId, pin: S.session.pinH, ids: String(d.ids).split(',') }).then(function () { toast('Cancelado.'); loadOt(); })
+      .catch(function (e) { if (e && e.error === 'bad_pin') { authLost(e); render(); return; } toast(e && e.offline ? 'Sin señal: no se canceló.' : errMsg(e)); });
+  },
   mark: function (d) { markNow(d.t); },
   syncnow: function () { toast('Enviando…'); syncNow(); },
   discard: function (d) { S.failed = S.failed.filter(function (f) { return f.r.id !== d.id; }); save(); render(); },
@@ -1057,6 +1188,11 @@ var inp = {
   hrs: function (v, el) { S.form.hrs[el.dataset.k] = v; S.form.hrsEdited = true; liveUpdate(); },
   liters: function (v) { S.form.liters = v; }, fhoro: function (v) { S.form.fhoro = v; }, notes: function (v) { S.form.notes = v; },
   reqNote: function (v) { S.reqNote = v; },
+  otuntil: function (v) { if (/^\d\d:\d\d$/.test(v)) { S.ot.f.until = v; var b = document.getElementById('otbar'); if (b) b.innerHTML = otBarHTML(); } },
+  otq: function (v) { S.ot.f.q = v; otListRefresh(); },
+  otwork: function (v) { S.ot.f.workText = v; },
+  otstretch: function (v) { S.ot.f.stretch = v; },
+  otnote: function (v) { S.ot.f.note = v; },
   exq: function (v) { S.ex.q = v; S.ex.shown = 15; S.ex.open = null; exRefresh(); },
   nstop: function (v) { S.form.nov.stop = v; liveUpdate(); },
   pa: function (v, el) { var p = S.form.prog[el.dataset.k] || (S.form.prog[el.dataset.k] = {}); p.a = v; },
@@ -1076,7 +1212,7 @@ app.addEventListener('change', function (e) { var t = e.target; if (!t.dataset |
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEv = e; soft(); });
 window.addEventListener('online', function () { S.net.lastErr = ''; syncNow(); refreshBootstrap(); });
 window.addEventListener('offline', function () { soft(); });
-document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { syncNow(); if (S.view === 'login') refreshBootstrap(); } });
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { syncNow(); if (S.session && S.session.role === 'staff' && S.session.rol === 'encargado' && S.view === 'staff' && S.ot.screen === 'home') loadOt(); if (S.view === 'login') refreshBootstrap(); } });
 setInterval(function () { if (S.session && S.session.role === 'op' && (mineQueue().length || mineMarks().length || S.net.lastErr)) syncNow(); }, 30000);
 render();
 /* pantalla de carga: se va cuando la app ya tiene sus datos (mínimo 0,7 s para que no parpadee) */
@@ -1091,5 +1227,5 @@ if (CFG.API_URL && CFG.API_KEY) {
   bp.then(function () { if (S.session && S.session.role === 'op') syncNow(); });
 } else hideSplash();
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
-if (window.__IED_TEST__) window.__IED_TEST__.hooks = { markNow: markNow, syncMarks: syncMarks, attToday: attToday, novText: novText, S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
+if (window.__IED_TEST__) window.__IED_TEST__.hooks = { loadOt: loadOt, otNew: otNew, otSend: otSend, otFiltered: otFiltered, markNow: markNow, syncMarks: syncMarks, attToday: attToday, novText: novText, S: S, act: act, inp: inp, api: api, syncNow: syncNow, buildReport: buildReport, submitForm: submitForm, pinDone: pinDone, docDone: docDone, refreshBootstrap: refreshBootstrap, parseNum: parseNum, render: render, parseProg: parseProg, setCFG: function (c) { Object.assign(CFG, c); } };
 })();

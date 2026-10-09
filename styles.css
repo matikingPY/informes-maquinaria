@@ -216,3 +216,15 @@ table.ex tr.xd td{background:var(--track);padding:12px 14px}
 
 .card.att .attrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 14px}.card.att .attrow b{display:block;font-size:1.5rem}
 .btn.att{background:var(--inkbg);border-color:var(--inkbg);color:#fff}
+
+.prog3{display:flex;gap:6px}.prog3 i{flex:1;height:5px;border-radius:3px;background:var(--track)}.prog3 i.on{background:var(--accent)}
+.prow{display:flex;align-items:center;gap:10px;width:100%;min-height:58px;padding:8px 12px;border-radius:14px;border:1.5px solid var(--line2);background:var(--surface);text-align:left;cursor:pointer;font-size:.9375rem}
+.prow[aria-pressed="true"]{border-color:var(--accent);border-left-width:5px}
+.prow .pbox{flex:none;width:24px;height:24px;border-radius:6px;border:2px solid var(--line2);display:inline-flex;align-items:center;justify-content:center}
+.prow[aria-pressed="true"] .pbox{background:var(--accent);border-color:var(--accent)}.prow[aria-pressed="true"] .pbox::after{content:"✓";color:#fff;font-weight:700;font-size:.9rem}
+.prow .pcode{flex:none;font-weight:700;min-width:4.4rem}.prow .pname{flex:1;min-width:0}
+.otbar{background:var(--inkbg);color:#fff;border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;font-weight:700}
+.otline{display:flex;align-items:center;gap:10px;padding:4px 0;border-top:1px solid var(--line)}.otline span:nth-child(2){flex:1}.otline .mono{font-weight:700;min-width:4.2rem}
+.otline .link{min-height:36px;padding:2px}
+.callout.ok{background:var(--good-bg);color:var(--good)}
+.card .mono,.prow .mono{white-space:nowrap}
