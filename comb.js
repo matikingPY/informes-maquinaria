@@ -516,7 +516,7 @@
     if (id === 'lf') { ev.preventDefault(); S.msg = '';
       if (S.step === 'cedula') { var c = $('#lc').value.replace(/\D/g, ''); if (!c) { S.msg = 'Ingresá tu cédula.'; return render(); } S.ced = c; lastCed = c;
         app.innerHTML = '<p class="muted">Verificando…</p>';
-        api('check').then(function (j) { S.nombre = j.nombre; S.step = j.estado; S.msg = ''; render(); }).catch(function (e) { S.msg = errTxt(e); S.ced = null; S.step = 'cedula'; render(); }); return; }
+        api('check').then(function (j) { S.nombre = j.nombre; S.step = (j.estado === 'crear') ? 'crear' : 'clave'; S.msg = ''; render(); }).catch(function (e) { S.msg = errTxt(e); S.ced = null; S.step = 'cedula'; render(); }); return; }
       var p = $('#lp').value; if (S.step === 'crear' && p !== $('#lp2').value) { S.msg = 'Las contraseñas no coinciden.'; return render(); }
       S.pass = p; app.innerHTML = '<p class="muted">Entrando…</p>';
       api(S.step === 'crear' ? 'crearClave' : 'login').then(function (j) { S.user = j.user; S.puedeCargar = !!j.puedeCargar; S.tab = S.puedeCargar ? 'salidas' : 'reportes';
