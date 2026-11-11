@@ -34,13 +34,13 @@
     var tolSt = data.params.tolStock; if (tolSt == null) tolSt = 100;
     var cam = {}; data.camiones.forEach(function (c) { cam[c.camion] = c; });
     return C.map(function (c) {
-      var ap = cam[c.camion] || { taxilitroApertura: 0, stockInicial: 0 }, ini = ap.taxilitroApertura;
-      C.forEach(function (o) { if (o.camion === c.camion && o.fecha < c.fecha && o.taxilitro > ini) ini = o.taxilitro; });
+      var ap = cam[c.camion] || { taxilitroApertura: 0, stockInicial: 0 }, ini = ap.taxilitroApertura, desdeF = ap.fechaApertura || '';
+      C.forEach(function (o) { if (o.camion === c.camion && o.fecha < c.fecha && o.taxilitro > ini) { ini = o.taxilitro; desdeF = o.fecha; } });
       var desp = c.taxilitro - ini;
-      var inf = sum(SA.filter(function (s) { return s.camion === c.camion && s.fecha === c.fecha; }), function (s) { return s.litros; });
+      var inf = sum(SA.filter(function (s) { return s.camion === c.camion && s.fecha > desdeF && s.fecha <= c.fecha; }), function (s) { return s.litros; });
       var dif = desp - inf;
       var entDia = sum(EN.filter(function (e) { return e.camion === c.camion && e.fecha === c.fecha; }), function (e) { return e.litros; });
-      var entAcum = sum(EN.filter(function (e) { return e.camion === c.camion && e.fecha <= c.fecha; }), function (e) { return e.litros; });
+      var entAcum = sum(EN.filter(function (e) { return e.camion === c.camion && e.fecha > (ap.fechaApertura || '') && e.fecha <= c.fecha; }), function (e) { return e.litros; });
       var stockT = ap.stockInicial + entAcum - (c.taxilitro - ap.taxilitroApertura);
       var difSt = (c.stock === null || c.stock === '' || c.stock === undefined) ? null : c.stock - stockT;
       return Object.assign({}, c, { inicial: ini, despachado: desp, informes: inf, diferencia: dif, cierra: Math.abs(dif) <= tolTx, entradasDia: entDia, stockTeorico: stockT, difStock: difSt, stockOk: difSt === null ? null : Math.abs(difSt) <= tolSt, retrocede: desp < 0 });

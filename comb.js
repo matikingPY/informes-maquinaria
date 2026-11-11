@@ -19,7 +19,7 @@
   function toast(t) { toastEl.textContent = t; toastEl.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.style.display = 'none'; }, 3200); }
   toastEl.style.display = 'none';
   var ERR = { clave_incorrecta: 'La clave de la página no coincide con el servidor.', login_incorrecto: 'Contraseña incorrecta.', login_requerido: 'Ingresá tu cédula y contraseña.', sin_acceso: 'Esa cédula no tiene acceso a esta página. Consultá con el Ingeniero Residente.', sin_permiso: 'Tu usuario solo puede ver reportes.', crear_clave: 'Tenés que crear tu contraseña.', clave_corta: 'La contraseña debe tener al menos 6 caracteres.', clave_ya_creada: 'Esa cédula ya tiene contraseña creada.', bloqueado: 'Demasiados intentos. Esperá 10 minutos.',
-    fecha_invalida: 'La fecha no es válida.', fecha_futura: 'La fecha no puede ser futura.', camion_invalido: 'Elegí un camión de la lista.', codigo_invalido: 'Ese código de máquina no existe.', numero_invalido: 'Revisá los números (deben ser mayores a cero).',
+    fecha_invalida: 'La fecha no es válida.', fecha_futura: 'La fecha no puede ser futura.', camion_invalido: 'Elegí un punto de despacho de la lista.', fecha_anterior_apertura: 'Esa fecha es anterior al inicio del control de ese punto de despacho.', faltan_datos: 'Completá código, nombre, tipo y operador.', codigo_existente: 'Ya existe una máquina con ese código.', codigo_invalido: 'Ese código de máquina no existe.', numero_invalido: 'Revisá los números (deben ser mayores a cero).',
     informe_requerido: 'Falta el N° de informe.', informe_repetido: 'Ese N° de informe ya está cargado.', cierre_repetido: 'Ese camión ya tiene un cierre cargado para esa fecha. Usá "Corregir" en la lista.', no_existe: 'Ese registro ya no existe.', ya_modificado: 'Ese registro ya fue corregido o anulado. Actualizá la lista.', error_servidor: 'Error del servidor. Probá de nuevo.', red: 'No hay conexión con el servidor. Revisá internet y probá de nuevo.' };
   function api(action, payload) {
     if (!CFG || /PEGAR/.test(CFG.API_URL)) return Promise.reject(new Error('sin_config'));
@@ -43,7 +43,7 @@
     who.innerHTML = S.user && S.data ? 'Control de combustible · <b>' + esc(S.user) + '</b> <button class="link" data-a="salir">Salir</button>' : '';
     if (!S.user) return loginView();
     if (!S.data) { app.innerHTML = '<p class="muted">Cargando datos…</p>'; return; }
-    var tabs = (S.puedeCargar ? [['salidas', 'Cargar salidas'], ['cierre', 'Cierre del camión'], ['entradas', 'Entradas']] : []).concat([['reportes', 'Reportes']]);
+    var tabs = (S.puedeCargar ? [['salidas', 'Cargar salidas'], ['cierre', 'Cierre de despacho'], ['entradas', 'Entradas']] : []).concat([['reportes', 'Reportes']]);
     app.innerHTML = '<div class="stack"><div class="tb">' + tabs.map(function (t) { return '<button data-a="tab" data-v="' + t[0] + '" aria-pressed="' + (S.tab === t[0]) + '">' + t[1] + '</button>'; }).join('') + '</div>' +
       (S.msg ? '<div class="err" role="alert">' + esc(S.msg) + '</div>' : '') + '<div id="vista"></div></div>';
     var v = { salidas: vSalidas, cierre: vCierre, entradas: vEntradas, reportes: vReportes }[S.tab]; v();
@@ -57,7 +57,7 @@
     app.innerHTML = h + '</form>';
     setTimeout(function () { var el = $('#lc') || $('#lp'); if (el) el.focus(); }, 30);
   }
-  function camOpts(sel) { return S.data.camiones.map(function (c) { return '<option' + (c.camion === sel ? ' selected' : '') + '>' + esc(c.camion) + '</option>'; }).join(''); }
+  function camOpts(sel) { return S.data.camiones.map(function (c) { return '<option value="' + esc(c.camion) + '"' + (c.camion === sel ? ' selected' : '') + '>' + esc(c.camion + (c.nombre ? ' · ' + c.nombre : '')) + '</option>'; }).join(''); }
 
   /* ----- Salidas ----- */
   function nextInforme() {
@@ -70,7 +70,7 @@
     $('#vista').innerHTML = '<div class="stack"><form class="card stack" id="fs"><div class="eyebrow">Nueva salida de combustible</div>' +
       '<div class="fgrid"><label class="f"><span>Fecha</span><input class="in mono" type="date" id="s_fecha" value="' + S.fecha + '" max="' + hoy() + '" required></label>' +
       '<label class="f"><span>N° informe</span><input class="in mono" id="s_inf" value="' + esc(nextInforme()) + '" required></label>' +
-      '<label class="f"><span>Camión</span><select class="in" id="s_cam">' + camOpts(S.camion) + '</select></label>' +
+      '<label class="f"><span>Salió de</span><select class="in" id="s_cam">' + camOpts(S.camion) + '</select></label>' +
       '<label class="f wide2"><span>Máquina (código o nombre)</span><input class="in" id="s_cod" list="dl_eq" autocomplete="off" placeholder="Ej.: MN-029" required></label>' +
       '<datalist id="dl_eq">' + d.equipos.map(function (e) { return '<option value="' + esc(e.codigo) + '">' + esc(e.nombre + (e.operador ? ' · ' + e.operador : '')) + '</option>'; }).join('') + '</datalist>' +
       '<label class="f"><span>Horómetro / km</span><input class="in mono" id="s_hor" inputmode="decimal" required></label>' +
@@ -84,8 +84,8 @@
   function estPill(s) { var e = s.estadoCalc; return pill(e, e === 'SOBRECONSUMO' ? 'crit' : e === 'Normal' ? 'ok' : e === 'Código inválido' ? 'crit' : e === 'Sin teórico' ? 'warn' : ''); }
   function tablaSalidas(rows) {
     if (!rows.length) return '<p class="muted small">Todavía no hay informes cargados para esta fecha.</p>';
-    return '<table class="tbl"><thead><tr><th>N°</th><th>Máquina</th><th>Operador</th><th class="num">Horóm.</th><th class="num">Litros</th><th class="num">Consumo real</th><th>Estado</th><th>Control</th><th></th></tr></thead><tbody>' +
-      rows.slice().reverse().map(function (s) { return '<tr><td class="mono">' + esc(s.informe) + '</td><td><b>' + esc(s.codigo) + '</b> <span class="muted small">' + esc(s.nombre) + '</span></td><td>' + esc(s.operador) + '</td><td class="num mono">' + fnum(s.horometro, 1) + '</td><td class="num mono">' + fnum(s.litros, 1) + '</td><td class="num mono">' + (s.real === null ? '—' : fnum(s.real, 2)) + '</td><td>' + estPill(s) + '</td><td>' + (s.control === 'OK' ? pill('OK', 'ok') : pill(s.control, 'warn')) + '</td><td class="nowrap"><button class="link" data-a="fix" data-t="salida" data-id="' + esc(s.id) + '">Corregir</button> <button class="link" data-a="anular" data-t="salida" data-id="' + esc(s.id) + '">Anular</button></td></tr>'; }).join('') + '</tbody></table>';
+    return '<table class="tbl"><thead><tr><th>N°</th><th>Origen</th><th>Máquina</th><th>Operador</th><th class="num">Horóm.</th><th class="num">Litros</th><th class="num">Consumo real</th><th>Estado</th><th>Control</th><th></th></tr></thead><tbody>' +
+      rows.slice().reverse().map(function (s) { return '<tr><td class="mono">' + esc(s.informe) + '</td><td>' + esc(s.camion) + '</td><td><b>' + esc(s.codigo) + '</b> <span class="muted small">' + esc(s.nombre) + '</span>' + altaTag(s.codigo) + '</td><td>' + esc(s.operador) + '</td><td class="num mono">' + fnum(s.horometro, 1) + '</td><td class="num mono">' + fnum(s.litros, 1) + '</td><td class="num mono">' + (s.real === null ? '—' : fnum(s.real, 2)) + '</td><td>' + estPill(s) + '</td><td>' + (s.control === 'OK' ? pill('OK', 'ok') : pill(s.control, 'warn')) + '</td><td class="nowrap"><button class="link" data-a="fix" data-t="salida" data-id="' + esc(s.id) + '">Corregir</button> <button class="link" data-a="anular" data-t="salida" data-id="' + esc(s.id) + '">Anular</button></td></tr>'; }).join('') + '</tbody></table>';
   }
   function resolverCodigo(txt) {
     txt = String(txt || '').trim().toUpperCase(); if (!txt) return null;
@@ -95,7 +95,8 @@
     var el = $('#s_prev'); if (!el) return;
     var e = resolverCodigo($('#s_cod').value);
     if (!$('#s_cod').value.trim()) { el.textContent = 'Elegí la máquina para ver su último horómetro y el consumo.'; return; }
-    if (!e) { el.innerHTML = '<span class="pill crit">Código no encontrado</span>'; return; }
+    if (!e && el.querySelector('[data-a=altaMaq]')) return; /* no reemplazar el botón mientras se lo toca */
+    if (!e) { el.innerHTML = '<span class="pill crit">Código no encontrado</span> Esta máquina no está registrada. <button class="btn primary" type="button" data-a="altaMaq" style="margin-left:8px">+ Registrar máquina</button>'; return; }
     var prevH = null; CC.salidas(S.data).forEach(function (s) { if (s.codigo === e.codigo && (prevH === null || s.horometro > prevH)) prevH = s.horometro; });
     var h = pnum($('#s_hor').value), l = pnum($('#s_lit').value), t = '<b>' + esc(e.codigo) + '</b> · ' + esc(e.nombre) + (e.operador ? ' · Operador: ' + esc(e.operador) : '') + '<br>' +
       (prevH === null ? 'Primera carga registrada de esta máquina (sin carga anterior).' : 'Último horómetro cargado: <b class="mono">' + fnum(prevH, 1) + '</b>') + (e.teorico ? ' · Consumo teórico: <b class="mono">' + fnum(e.teorico, 2) + '</b> por unidad' : ' · <span class="pill warn">Sin consumo teórico</span>');
@@ -114,7 +115,7 @@
   function guardarSalida(ev) {
     ev.preventDefault();
     var e = resolverCodigo($('#s_cod').value), h = pnum($('#s_hor').value), l = pnum($('#s_lit').value);
-    if (!e) { S.msg = 'Ese código de máquina no existe.'; return render(); }
+    if (!e) { S.msg = 'Esa máquina no está registrada. Tocá "+ Registrar máquina".'; return render(); }
     if (!(h > 0) || !(l > 0)) { S.msg = 'Revisá horómetro y litros.'; return render(); }
     var f = $('#s_fecha').value, cam = $('#s_cam').value; S.fecha = f; S.camion = cam;
     var chk = CC.previa(S.data, { fecha: f, informe: '__', camion: cam, codigo: e.codigo, horometro: h, litros: l });
@@ -127,8 +128,8 @@
     var d = S.data, lista = CC.cierres(d).slice().reverse().slice(0, 40);
     $('#vista').innerHTML = '<div class="stack"><div class="g2"><form class="card stack" id="fc"><div class="eyebrow">Cierre de la jornada</div>' +
       '<label class="f"><span>Fecha</span><input class="in mono" type="date" id="c_fecha" value="' + S.fecha + '" max="' + hoy() + '" required></label>' +
-      '<label class="f"><span>Camión</span><select class="in" id="c_cam">' + camOpts(S.camion) + '</select></label>' +
-      '<label class="f"><span>Taxilitro al final de la jornada</span><input class="in mono" id="c_tx" inputmode="decimal" required></label>' +
+      '<label class="f"><span>Punto de despacho</span><select class="in" id="c_cam">' + camOpts(S.camion) + '</select></label>' +
+      '<label class="f"><span>Lectura del contador (taxilitro) al final de la jornada</span><input class="in mono" id="c_tx" inputmode="decimal" required></label>' +
       '<label class="f"><span>Stock medido en el tanque (opcional)</span><input class="in mono" id="c_st" inputmode="decimal"></label>' +
       '<label class="f"><span>Observación (opcional)</span><input class="in" id="c_ob" maxlength="200"></label>' +
       '<button class="btn primary" type="submit">Guardar cierre</button></form>' +
@@ -137,7 +138,7 @@
   }
   function filaCierreCtl(c) {
     return '<div class="row"><span>Taxilitro inicial</span><b class="mono">' + fnum(c.inicial, 1) + '</b></div><div class="row"><span>Despachado según taxilitro</span><b class="mono">' + fnum(c.despachado, 1) + ' L</b></div>' +
-      '<div class="row"><span>Suma de informes de salida del día</span><b class="mono">' + fnum(c.informes, 1) + ' L</b></div><div class="row"><span>Diferencia</span><b class="mono">' + (c.diferencia > 0 ? '+' : '') + fnum(c.diferencia, 1) + ' L</b></div>' +
+      '<div class="row"><span>Suma de informes de salida (desde el cierre anterior)</span><b class="mono">' + fnum(c.informes, 1) + ' L</b></div><div class="row"><span>Diferencia</span><b class="mono">' + (c.diferencia > 0 ? '+' : '') + fnum(c.diferencia, 1) + ' L</b></div>' +
       '<div style="margin:10px 0">' + (c.retrocede ? pill('El taxilitro es menor al anterior: revisá', 'crit') : c.cierra ? pill('CIERRA', 'ok') : pill('NO CIERRA · ' + (c.diferencia > 0 ? 'faltan respaldar ' : 'informes de más: ') + fnum(Math.abs(c.diferencia), 1) + ' L', 'crit')) + '</div>' +
       '<div class="row"><span>Entradas del día</span><b class="mono">' + fnum(c.entradasDia, 1) + ' L</b></div><div class="row"><span>Stock teórico al cierre</span><b class="mono">' + fnum(c.stockTeorico, 1) + ' L</b></div>' +
       '<div style="margin-top:10px">' + (c.difStock === null ? pill('Sin stock medido', '') : c.stockOk ? pill('Stock OK (dif. ' + fnum(c.difStock, 1) + ' L)', 'ok') : pill('REVISAR stock: dif. ' + fnum(c.difStock, 1) + ' L', 'crit')) + '</div>';
@@ -154,7 +155,7 @@
   }
   function tablaCierres(rows) {
     if (!rows.length) return '<p class="muted small">Todavía no hay cierres cargados.</p>';
-    return '<table class="tbl"><thead><tr><th>Fecha</th><th>Camión</th><th class="num">Taxilitro</th><th class="num">Despachado</th><th class="num">Informes</th><th class="num">Dif.</th><th>Cierre</th><th class="num">Stock teórico</th><th class="num">Stock medido</th><th></th></tr></thead><tbody>' +
+    return '<table class="tbl"><thead><tr><th>Fecha</th><th>Origen</th><th class="num">Taxilitro</th><th class="num">Despachado</th><th class="num">Informes</th><th class="num">Dif.</th><th>Cierre</th><th class="num">Stock teórico</th><th class="num">Stock medido</th><th></th></tr></thead><tbody>' +
       rows.map(function (c) { return '<tr><td>' + fdate(c.fecha) + '</td><td>' + esc(c.camion) + '</td><td class="num mono">' + fnum(c.taxilitro, 1) + '</td><td class="num mono">' + fnum(c.despachado, 1) + '</td><td class="num mono">' + fnum(c.informes, 1) + '</td><td class="num mono">' + fnum(c.diferencia, 1) + '</td><td>' + (c.cierra ? pill('CIERRA', 'ok') : pill('NO CIERRA', 'crit')) + '</td><td class="num mono">' + fnum(c.stockTeorico, 1) + '</td><td class="num mono">' + fnum(c.stock, 1) + '</td><td class="nowrap"><button class="link" data-a="fix" data-t="cierre" data-id="' + esc(c.id) + '">Corregir</button> <button class="link" data-a="anular" data-t="cierre" data-id="' + esc(c.id) + '">Anular</button></td></tr>'; }).join('') + '</tbody></table>';
   }
   function guardarCierre(ev) {
@@ -166,15 +167,15 @@
   /* ----- Entradas ----- */
   function vEntradas() {
     var lista = S.data.entradas.filter(function (e) { return e.estado === 'vigente'; }).slice().reverse().slice(0, 40);
-    $('#vista').innerHTML = '<div class="stack"><form class="card stack" id="fe"><div class="eyebrow">Entrada de combustible al camión</div><div class="fgrid">' +
+    $('#vista').innerHTML = '<div class="stack"><form class="card stack" id="fe"><div class="eyebrow">Entrada de combustible</div><div class="fgrid">' +
       '<label class="f"><span>Fecha</span><input class="in mono" type="date" id="e_fecha" value="' + S.fecha + '" max="' + hoy() + '" required></label>' +
-      '<label class="f"><span>Camión</span><select class="in" id="e_cam">' + camOpts(S.camion) + '</select></label>' +
+      '<label class="f"><span>Punto de despacho</span><select class="in" id="e_cam">' + camOpts(S.camion) + '</select></label>' +
       '<label class="f"><span>N° de remito</span><input class="in mono" id="e_rem"></label>' +
       '<label class="f wide2"><span>Proveedor / origen</span><input class="in" id="e_prov"></label>' +
       '<label class="f"><span>Litros ingresados</span><input class="in mono" id="e_lit" inputmode="decimal" required></label>' +
       '<button class="btn primary" type="submit" style="min-height:56px">Guardar entrada</button></div></form>' +
       '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Últimas entradas</div><div class="scroll">' +
-      (lista.length ? '<table class="tbl"><thead><tr><th>Fecha</th><th>Camión</th><th>Remito</th><th>Proveedor</th><th class="num">Litros</th><th></th></tr></thead><tbody>' + lista.map(function (e) { return '<tr><td>' + fdate(e.fecha) + '</td><td>' + esc(e.camion) + '</td><td class="mono">' + esc(e.remito) + '</td><td>' + esc(e.proveedor) + '</td><td class="num mono">' + fnum(e.litros, 1) + '</td><td class="nowrap"><button class="link" data-a="fix" data-t="entrada" data-id="' + esc(e.id) + '">Corregir</button> <button class="link" data-a="anular" data-t="entrada" data-id="' + esc(e.id) + '">Anular</button></td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted small">Todavía no hay entradas cargadas.</p>') + '</div></div></div>';
+      (lista.length ? '<table class="tbl"><thead><tr><th>Fecha</th><th>Origen</th><th>Remito</th><th>Proveedor</th><th class="num">Litros</th><th></th></tr></thead><tbody>' + lista.map(function (e) { return '<tr><td>' + fdate(e.fecha) + '</td><td>' + esc(e.camion) + '</td><td class="mono">' + esc(e.remito) + '</td><td>' + esc(e.proveedor) + '</td><td class="num mono">' + fnum(e.litros, 1) + '</td><td class="nowrap"><button class="link" data-a="fix" data-t="entrada" data-id="' + esc(e.id) + '">Corregir</button> <button class="link" data-a="anular" data-t="entrada" data-id="' + esc(e.id) + '">Anular</button></td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted small">Todavía no hay entradas cargadas.</p>') + '</div></div></div>';
   }
   function guardarEntrada(ev) {
     ev.preventDefault(); var l = pnum($('#e_lit').value); if (!(l > 0)) { S.msg = 'Ingresá los litros.'; return render(); }
@@ -228,7 +229,8 @@
     { k: 'control', l: 'Control', v: function (x) { return x.control; }, h: function (x) { return x.control === 'OK' ? pill('OK', 'ok') : pill(x.control, 'warn'); } }]; }
   function uniq(a) { var o = {}; a.forEach(function (x) { if (x) o[x] = 1; }); return Object.keys(o).sort(); }
   function opt(list, sel, todos) { return '<option value="">' + todos + '</option>' + list.map(function (x) { return '<option' + (x === sel ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join(''); }
-  function vReportes() {
+  function vReportes() { vReportes0(); vAltas(); }
+  function vReportes0() {
     if (!S.repD) setPreset('mes');
     var d = S.data, f = S.f, r = CC.reporte(d, S.repD, S.repH, filtros()), s = r.resumen, rojo = function (n) { return n ? 'var(--crit)' : 'inherit'; };
     var activos = [];
@@ -245,7 +247,7 @@
       '<div class="fgrid"><label class="f"><span>Desde</span><input class="in mono" type="date" id="r_d" value="' + S.repD + '"></label><label class="f"><span>Hasta</span><input class="in mono" type="date" id="r_h" value="' + S.repH + '"></label>' +
       '<label class="f"><span>Tipo de equipo</span><select class="in" id="f_tipo">' + opt(uniq(d.equipos.map(function (e) { return e.tipo; })), f.tipo, 'Todos') + '</select></label>' +
       '<label class="f"><span>Operador</span><select class="in" id="f_operador">' + opt(uniq(d.equipos.map(function (e) { return e.operador; })), f.operador, 'Todos') + '</select></label>' +
-      '<label class="f"><span>Camión</span><select class="in" id="f_camion">' + opt(d.camiones.map(function (c) { return c.camion; }), f.camion, 'Todos') + '</select></label>' +
+      '<label class="f"><span>Punto de despacho</span><select class="in" id="f_camion">' + opt(d.camiones.map(function (c) { return c.camion; }), f.camion, 'Todos') + '</select></label>' +
       '<label class="f"><span>Estado</span><select class="in" id="f_estado">' + ESTADOS.map(function (e) { return '<option value="' + e[0] + '"' + (e[0] === f.estado ? ' selected' : '') + '>' + e[1] + '</option>'; }).join('') + '</select></label>' +
       '<label class="f"><span>Desvío mínimo (%)</span><input class="in mono" id="f_desvio" inputmode="decimal" placeholder="Ej.: 20" value="' + esc(f.desvioMin) + '"></label>' +
       '<label class="f wide2"><span>Máquina (agregá una o varias)</span><input class="in" id="f_cod" list="dl_rep" autocomplete="off" placeholder="Escribí el código y elegí"></label><datalist id="dl_rep">' + d.equipos.map(function (e) { return '<option value="' + esc(e.codigo) + '">' + esc(e.nombre) + '</option>'; }).join('') + '</datalist></div>' +
@@ -256,8 +258,8 @@
       '<div class="card"><span class="eyebrow">Con sobreconsumo</span><b class="mono" style="color:' + rojo(s.sobreconsumo) + '">' + s.sobreconsumo + '</b></div><div class="card"><span class="eyebrow">Días que no cierran</span><b class="mono" style="color:' + rojo(s.diasNoCierran) + '">' + s.diasNoCierran + '</b></div>' +
       '<div class="card"><span class="eyebrow">Cargas sin cierre de taxilitro</span><b class="mono" style="color:' + rojo(s.sinCierre) + '">' + s.sinCierre + '</b></div><div class="card"><span class="eyebrow">Cargas a revisar</span><b class="mono" style="color:' + rojo(s.aRevisar) + '">' + s.aRevisar + '</b></div></div>' +
       '<div class="g2w">' +
-      '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Camión lubricador: estado actual</div><div class="scroll"><table class="tbl"><thead><tr><th>Camión</th><th>Último cierre</th><th class="num">Taxilitro</th><th class="num">Stock teórico (L)</th><th class="num">Stock medido (L)</th><th>Control</th></tr></thead><tbody>' + camTbl + '</tbody></table></div></div>' +
-      '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Cierre diario: taxilitro vs informes <span class="muted" style="text-transform:none;letter-spacing:0">(no cambia con los filtros de máquina)</span></div><div class="scroll">' + (dias ? '<table class="tbl"><thead><tr><th>Fecha</th><th>Camión</th><th class="num">Despachado (L)</th><th class="num">Informes (L)</th><th class="num">Diferencia (L)</th><th>Cierre</th></tr></thead><tbody>' + dias + '</tbody></table>' : '<p class="muted small">No hay cierres en el período.</p>') + '</div></div>' +
+      '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Puntos de despacho: estado actual</div><div class="scroll"><table class="tbl"><thead><tr><th>Origen</th><th>Último cierre</th><th class="num">Taxilitro</th><th class="num">Stock teórico (L)</th><th class="num">Stock medido (L)</th><th>Control</th></tr></thead><tbody>' + camTbl + '</tbody></table></div></div>' +
+      '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Cierre diario: taxilitro vs informes <span class="muted" style="text-transform:none;letter-spacing:0">(no cambia con los filtros de máquina)</span></div><div class="scroll">' + (dias ? '<table class="tbl"><thead><tr><th>Fecha</th><th>Origen</th><th class="num">Despachado (L)</th><th class="num">Informes (L)</th><th class="num">Diferencia (L)</th><th>Cierre</th></tr></thead><tbody>' + dias + '</tbody></table>' : '<p class="muted small">No hay cierres en el período.</p>') + '</div></div>' +
       '</div>' +
       '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Consumo por máquina (' + r.maq.length + ') <span class="muted" style="text-transform:none;letter-spacing:0">· tocá un título para ordenar</span></div><div class="scroll">' + tablaOrd('maq', colsMaq(), r.maq, 'desvio', 'desc', 'No hay cargas con estos filtros.') + '</div></div>' +
       '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Detalle de cargas (' + r.rows.length + ')</div><div class="scroll">' + tablaOrd('det', colsDet(), r.rows, 'fecha', 'desc', 'No hay cargas con estos filtros.') + '</div></div></div>';
@@ -322,7 +324,7 @@
       var kp = [['Litros cargados a máquinas', s.litros, '#,##0'], ['Cantidad de cargas', s.cargas, '#,##0'], ['Máquinas incluidas', s.maquinas, '0'], ['Máquinas con SOBRECONSUMO (tolerancia ' + tolTxt() + ')', s.sobreconsumo, '0', 1], ['Días en que el taxilitro NO cierra con los informes', s.diasNoCierran, '0', 1], ['Cargas cuyo día no tiene cierre de taxilitro', s.sinCierre, '0', 1], ['Cargas a revisar (informe repetido, horómetro o litros dudosos)', s.aRevisar, '0', 1]];
       kp.forEach(function (k, i) { var r1 = w1.getRow(f + i); w1.mergeCells(f + i, 1, f + i, 6); var a1 = r1.getCell(1), b1 = r1.getCell(7); a1.value = k[0]; a1.font = { name: 'Arial', size: 10 }; b1.value = k[1]; b1.numFmt = k[2]; b1.font = { name: 'Arial', size: 11, bold: true, color: { argb: k[3] && k[1] > 0 ? TXT.crit : NEG } }; b1.alignment = { horizontal: 'right' }; if (k[3] && k[1] > 0) b1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL.crit } }; for (var j = 1; j <= 7; j++) r1.getCell(j).border = { bottom: thin }; r1.height = 20; });
       f += kp.length + 1;
-      f = seccion(w1, f, 'Camión lubricador: estado actual', 8);
+      f = seccion(w1, f, 'Puntos de despacho: estado actual', 8);
       var cam = CC.camiones(S.data).filter(function (c) { return !S.f.camion || c.camion === S.f.camion; });
       f = tabla(w1, f, [{ h: 'Camión', w: 12, k: function (c) { return c.camion; }, b: 1 }, { h: 'Último cierre', w: 14, k: function (c) { return c.ultimo ? fdate(c.ultimo.fecha) : 'Sin cierres'; }, c: 'center' }, { h: 'Taxilitro', w: 14, k: function (c) { return c.ultimo ? c.ultimo.taxilitro : null; }, f: '#,##0.0' }, { h: 'Stock teórico (L)', w: 16, k: function (c) { return c.ultimo ? c.ultimo.stockTeorico : null; }, f: '#,##0.0' }, { h: 'Stock medido (L)', w: 16, k: function (c) { return c.ultimo ? c.ultimo.stock : null; }, f: '#,##0.0' }, { h: 'Control de stock', w: 16, e: 1, k: function (c) { var u = c.ultimo; return !u ? '' : u.difStock === null ? 'Sin medición' : u.stockOk ? 'OK' : 'REVISAR'; } }], cam) + 1;
       f = seccion(w1, f, 'Máquinas con sobreconsumo', 8);
@@ -371,7 +373,7 @@
     var det = r.rows.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : (Number(a.informe) || 0) - (Number(b.informe) || 0); });
     var h = '<div class="ph"><picture><source media="(prefers-color-scheme: dark)" srcset="icons/logo.png"><img src="icons/logo.png" alt="WheelCo"></picture><div><h1>Reporte de control de combustible</h1><p>Período: <b>' + fdate(S.repD) + ' al ' + fdate(S.repH) + '</b> · ' + esc(filtroTxt()) + '</p><p class="g">Generado por ' + esc(S.user) + ' el ' + ahora() + '</p></div></div>' +
       '<h2>Indicadores</h2><div class="pk">' + [['Litros cargados', fnum(s.litros, 0), 0], ['Cargas', s.cargas, 0], ['Máquinas', s.maquinas, 0], ['Con sobreconsumo', s.sobreconsumo, s.sobreconsumo], ['Días que no cierran', s.diasNoCierran, s.diasNoCierran], ['Cargas sin cierre de taxilitro', s.sinCierre, s.sinCierre], ['Cargas a revisar', s.aRevisar, s.aRevisar]].map(function (k) { return '<div class="' + (k[2] ? 'al' : '') + '"><span>' + k[0] + '</span><b>' + k[1] + '</b></div>'; }).join('') + '</div>' +
-      '<h2>Camión lubricador: estado actual</h2><table>' + th([['Camión'], ['Último cierre'], ['Taxilitro', 1], ['Stock teórico (L)', 1], ['Stock medido (L)', 1], ['Control']]) + cam.map(function (c) { var u = c.ultimo; return '<tr><td><b>' + esc(c.camion) + '</b></td>' + (u ? '<td>' + fdate(u.fecha) + '</td><td class="nm">' + fnum(u.taxilitro, 1) + '</td><td class="nm">' + fnum(u.stockTeorico, 1) + '</td><td class="nm">' + fnum(u.stock, 1) + '</td><td>' + tag(u.difStock === null ? 'Sin medición' : u.stockOk ? 'OK' : 'REVISAR') + '</td>' : '<td colspan="5">Sin cierres cargados</td>') + '</tr>'; }).join('') + '</table>' +
+      '<h2>Puntos de despacho: estado actual</h2><table>' + th([['Camión'], ['Último cierre'], ['Taxilitro', 1], ['Stock teórico (L)', 1], ['Stock medido (L)', 1], ['Control']]) + cam.map(function (c) { var u = c.ultimo; return '<tr><td><b>' + esc(c.camion) + '</b></td>' + (u ? '<td>' + fdate(u.fecha) + '</td><td class="nm">' + fnum(u.taxilitro, 1) + '</td><td class="nm">' + fnum(u.stockTeorico, 1) + '</td><td class="nm">' + fnum(u.stock, 1) + '</td><td>' + tag(u.difStock === null ? 'Sin medición' : u.stockOk ? 'OK' : 'REVISAR') + '</td>' : '<td colspan="5">Sin cierres cargados</td>') + '</tr>'; }).join('') + '</table>' +
       '<h2>Cierre diario: taxilitro vs informes</h2>' + (r.cierres.length ? '<table>' + th([['Fecha'], ['Camión'], ['Despachado (L)', 1], ['Informes (L)', 1], ['Diferencia (L)', 1], ['Entradas (L)', 1], ['Cierre']]) + r.cierres.map(function (c) { return '<tr><td>' + fdate(c.fecha) + '</td><td>' + esc(c.camion) + '</td><td class="nm">' + fnum(c.despachado, 1) + '</td><td class="nm">' + fnum(c.informes, 1) + '</td><td class="nm">' + (c.diferencia > 0 ? '+' : '') + fnum(c.diferencia, 1) + '</td><td class="nm">' + fnum(c.entradasDia, 1) + '</td><td>' + tag(c.cierra ? 'CIERRA' : 'NO CIERRA') + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cierres en el período.</p>') +
       '<h2>Consumo por máquina (' + maq.length + ')</h2>' + (maq.length ? '<table>' + th([['Máquina'], ['Operador'], ['Cargas', 1], ['Litros', 1], ['Uso (h/km)', 1], ['Real', 1], ['Teórico', 1], ['Desvío', 1], ['Estado']]) + maq.map(function (m) { return '<tr><td><b>' + esc(m.codigo) + '</b> ' + esc(m.nombre) + '</td><td>' + esc(m.operador) + '</td><td class="nm">' + m.cargas + '</td><td class="nm">' + fnum(m.litros, 1) + '</td><td class="nm">' + fnum(m.uso, 1) + '</td><td class="nm">' + fnum(m.real, 2) + '</td><td class="nm">' + fnum(m.teorico, 2) + '</td><td class="nm">' + (m.desvio === null ? '—' : (m.desvio >= 0 ? '+' : '') + fnum(m.desvio * 100, 0) + '%') + '</td><td>' + tag(m.estado) + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cargas con estos filtros.</p>') +
       '<h2 class="pb">Detalle de cargas (' + det.length + ')</h2>' + (det.length ? '<table>' + th([['Fecha'], ['N°'], ['Máquina'], ['Operador'], ['Horóm.', 1], ['Litros', 1], ['Real', 1], ['Desvío', 1], ['Estado'], ['Control']]) + det.map(function (x) { return '<tr><td>' + fdate(x.fecha) + '</td><td>' + esc(x.informe) + '</td><td><b>' + esc(x.codigo) + '</b></td><td>' + esc(x.operador) + '</td><td class="nm">' + fnum(x.horometro, 1) + '</td><td class="nm">' + fnum(x.litros, 1) + '</td><td class="nm">' + fnum(x.real, 2) + '</td><td class="nm">' + (x.desvio === null ? '—' : (x.desvio >= 0 ? '+' : '') + fnum(x.desvio * 100, 0) + '%') + '</td><td>' + tag(x.estadoCalc) + '</td><td>' + tag(x.control) + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cargas con estos filtros.</p>') +
@@ -430,9 +432,9 @@
   function buscar(t, id) { var arr = t === 'salida' ? S.data.salidas : t === 'cierre' ? S.data.cierres : S.data.entradas; return arr.filter(function (o) { return o.id === id; })[0]; }
   function abrirFix(t, id) {
     var o = buscar(t, id); if (!o) return;
-    var campos = t === 'salida' ? [['fecha', 'Fecha', 'date'], ['informe', 'N° informe', 'text'], ['camion', 'Camión', 'sel'], ['codigo', 'Código de máquina', 'text'], ['horometro', 'Horómetro / km', 'num'], ['litros', 'Litros', 'num']] :
-      t === 'cierre' ? [['fecha', 'Fecha', 'date'], ['camion', 'Camión', 'sel'], ['taxilitro', 'Taxilitro final', 'num'], ['stock', 'Stock medido', 'num'], ['obs', 'Observación', 'text']] :
-        [['fecha', 'Fecha', 'date'], ['camion', 'Camión', 'sel'], ['remito', 'N° de remito', 'text'], ['proveedor', 'Proveedor', 'text'], ['litros', 'Litros', 'num']];
+    var campos = t === 'salida' ? [['fecha', 'Fecha', 'date'], ['informe', 'N° informe', 'text'], ['camion', 'Punto de despacho', 'sel'], ['codigo', 'Código de máquina', 'text'], ['horometro', 'Horómetro / km', 'num'], ['litros', 'Litros', 'num']] :
+      t === 'cierre' ? [['fecha', 'Fecha', 'date'], ['camion', 'Punto de despacho', 'sel'], ['taxilitro', 'Taxilitro final', 'num'], ['stock', 'Stock medido', 'num'], ['obs', 'Observación', 'text']] :
+        [['fecha', 'Fecha', 'date'], ['camion', 'Punto de despacho', 'sel'], ['remito', 'N° de remito', 'text'], ['proveedor', 'Proveedor', 'text'], ['litros', 'Litros', 'num']];
     dlg.innerHTML = '<form method="dialog" class="stack" id="fx"><h2 style="font-size:1.25rem">Corregir ' + t + '</h2><p class="muted small">Se guarda una línea nueva y la original queda registrada como corregida (con tu nombre y la hora).</p>' +
       campos.map(function (c) { var v = o[c[0]]; return '<label class="f"><span>' + c[1] + '</span>' + (c[2] === 'sel' ? '<select class="in" name="' + c[0] + '">' + camOpts(v) + '</select>' : '<input class="in' + (c[2] === 'text' ? '' : ' mono') + '" name="' + c[0] + '" ' + (c[2] === 'date' ? 'type="date" max="' + hoy() + '"' : c[2] === 'num' ? 'inputmode="decimal"' : '') + ' value="' + esc(c[2] === 'num' && v !== null && v !== '' ? String(v).replace('.', ',') : v) + '">') + '</label>'; }).join('') +
       '<div id="fxerr" class="err hide"></div><div style="display:flex;gap:10px"><button class="btn" type="button" data-a="fxno">Cancelar</button><button class="btn primary" type="submit">Guardar corrección</button></div></form>';
@@ -443,6 +445,45 @@
       if (t === 'salida') { var e = resolverCodigo(d.codigo); if (!e) return fxErr('Ese código de máquina no existe.'); d.codigo = e.codigo; }
       api('fix', { tipo: t, id: id, rid: rid(), modo: 'corregir', data: d }).then(function () { dlg.close(); toast('Corrección guardada'); cargar(); }).catch(function (e2) { fxErr(errTxt(e2)); });
     };
+  }
+  /* ----- Alta de máquina nueva (queda registrado quién la dio de alta) ----- */
+  function altaTag(cod) {
+    var a = (S.data.altas || []).filter(function (x) { return x.codigo === cod; })[0]; if (!a) return '';
+    var dias = (Date.now() - new Date(String(a.en).replace(' ', 'T')).getTime()) / 864e5;
+    return dias <= 7 ? ' <span class="pill warn" title="Registrada por ' + esc(a.por) + ' el ' + esc(a.en) + '">Alta nueva</span>' : '';
+  }
+  function abrirAlta() {
+    var cod0 = ($('#s_cod') && $('#s_cod').value || '').trim().toUpperCase().replace(/\s+/g, '');
+    var tipos = []; S.data.equipos.forEach(function (e) { if (e.tipo && tipos.indexOf(e.tipo) < 0) tipos.push(e.tipo); }); tipos.sort();
+    var ahora = new Date(), hh = ahora.getFullYear() + '-' + p2(ahora.getMonth() + 1) + '-' + p2(ahora.getDate()) + ' ' + p2(ahora.getHours()) + ':' + p2(ahora.getMinutes());
+    dlg.innerHTML = '<form method="dialog" class="stack" id="fa"><h2 style="font-size:1.25rem">Registrar máquina nueva</h2>' +
+      '<label class="f"><span>Código *</span><input class="in mono" name="codigo" value="' + esc(cod0) + '" maxlength="30" required></label>' +
+      '<label class="f"><span>Nombre / equipo *</span><input class="in" name="nombre" maxlength="80" placeholder="Ej.: Excavadora Hyundai 210" required></label>' +
+      '<label class="f"><span>Tipo de máquina *</span><select class="in" name="tipo" id="a_tipo"><option value="">Elegí un tipo…</option>' + tipos.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('') + '<option value="__otro">+ Otro tipo…</option></select></label>' +
+      '<label class="f hide" id="a_otrow"><span>Nuevo tipo *</span><input class="in" id="a_otro" maxlength="60"></label>' +
+      '<label class="f"><span>Nombre del operador *</span><input class="in" name="operador" maxlength="80" required></label>' +
+      '<div class="prev small">Quedará registrado: <b>Alta hecha por ' + esc(S.user) + '</b> · ' + hh + '<br>El consumo teórico queda vacío hasta que se complete en “Editar máquinas”.</div>' +
+      '<div id="fxerr" class="err hide"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="button" data-a="altano">Cancelar</button><button class="btn primary" type="submit" style="flex:1">Registrar y seguir con la carga</button></div></form>';
+    dlg.showModal();
+    $('#a_tipo').onchange = function () { $('#a_otrow').classList.toggle('hide', this.value !== '__otro'); };
+    $('#fa').onsubmit = function (ev) {
+      ev.preventDefault(); var f = new FormData($('#fa')), tipo = String(f.get('tipo') || '');
+      if (tipo === '__otro') tipo = $('#a_otro').value.trim();
+      var d = { codigo: String(f.get('codigo')).trim(), nombre: String(f.get('nombre')).trim(), tipo: tipo, operador: String(f.get('operador')).trim() };
+      if (!d.codigo || !d.nombre || !d.tipo || !d.operador) return fxErr('Completá todos los campos.');
+      var btn = $('#fa button[type=submit]'); btn.disabled = true;
+      api('addMaquina', { rid: rid(), data: d }).then(function (j) {
+        dlg.close(); toast('Máquina registrada: ' + j.codigo);
+        cargar(function () { render(); var el = $('#s_cod'); if (el) { el.value = j.codigo; actualizarPrevia(); var h = $('#s_hor'); if (h) h.focus(); } });
+      }).catch(function (e2) { btn.disabled = false; fxErr(errTxt(e2)); });
+    };
+  }
+  function vAltas() {
+    var a = (S.data.altas || []).slice().reverse(); if (!a.length || !$('#vista')) return;
+    var el = document.createElement('div'); el.className = 'card'; el.id = 'altasCard';
+    el.innerHTML = '<div class="eyebrow" style="margin-bottom:8px">Máquinas registradas desde esta página</div><div class="scroll"><table class="tbl"><thead><tr><th>Fecha</th><th>Código</th><th>Nombre</th><th>Tipo</th><th>Operador</th><th>Registrada por</th></tr></thead><tbody>' +
+      a.map(function (x) { return '<tr><td>' + esc(x.en) + '</td><td><b>' + esc(x.codigo) + '</b></td><td>' + esc(x.nombre) + '</td><td>' + esc(x.tipo) + '</td><td>' + esc(x.operador) + '</td><td>' + esc(x.por) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    var st = $('#vista').firstElementChild; (st && st.classList.contains('stack') ? st : $('#vista')).appendChild(el);
   }
   function fxErr(m) { var e = $('#fxerr'); e.textContent = m; e.classList.remove('hide'); }
   function anular(t, id) {
@@ -457,6 +498,8 @@
     if (a === 'salir') { salir(); }
     else if (a === 'tab') { S.tab = b.dataset.v; S.msg = ''; render(); }
     else if (a === 'fix') abrirFix(b.dataset.t, b.dataset.id);
+    else if (a === 'altaMaq') abrirAlta();
+    else if (a === 'altano') dlg.close();
     else if (a === 'anular') anular(b.dataset.t, b.dataset.id);
     else if (a === 'fxno') dlg.close();
     else if (a === 'otra') { S.step = 'cedula'; S.msg = ''; S.ced = null; render(); }
