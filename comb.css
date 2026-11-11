@@ -1,0 +1,34 @@
+.tb{display:flex;gap:6px;flex-wrap:wrap}
+.tb button{border:0;padding:12px 22px;border-radius:999px;font-weight:700;background:var(--seg);color:var(--ink2);cursor:pointer;min-height:46px}
+.tb button[aria-pressed="true"]{background:var(--inkbg);color:#fff}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
+.fgrid .wide2{grid-column:span 2}
+label.f{display:block;font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+label.f>span{display:block;margin-bottom:4px}
+.in{width:100%;border:2px solid var(--edge);border-radius:14px;padding:10px 14px;background:var(--surface);min-height:50px;font-size:1.05rem}
+.in.mono{font-family:var(--f-mono)}
+.in:focus{outline:3px solid var(--accent);outline-offset:1px}
+.prev{padding:12px 14px;border-radius:14px;background:var(--seg);min-height:48px}
+.tbl{width:100%;border-collapse:collapse;font-size:.95rem}
+.tbl th{text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:8px;border-bottom:2px solid var(--line);white-space:nowrap}
+.tbl td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl td.num,.tbl th.num{text-align:right}
+.scroll{overflow-x:auto}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+.cbkpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.cbkpi .card b{display:block;font-size:1.8rem;line-height:1.1;margin-top:4px}
+.err{color:var(--crit);background:var(--crit-bg);padding:10px 14px;border-radius:12px;font-weight:600}
+dialog{border:2px solid var(--edge);border-radius:20px;padding:20px;max-width:34rem;width:92vw;background:var(--surface);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.btn.inline{width:auto}
+.hide{display:none!important}
+.login{max-width:24rem;margin:30px auto}
+.nowrap{white-space:nowrap}
+.fgrid>.btn{grid-column:1/-1}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:2px solid var(--edge);background:var(--surface);border-radius:999px;padding:6px 14px;font-weight:700;cursor:pointer;min-height:40px}
+.chip[aria-pressed="true"],.chip.on{background:var(--inkbg);color:#fff;border-color:var(--inkbg)}
+.sortb{background:none;border:0;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;font-weight:700;cursor:pointer;padding:0}
+.sortb:hover{color:var(--accent-text)}
