@@ -41,3 +41,33 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .chip[aria-pressed="true"]::before{content:"✓ ";font-weight:800}
 .chip{transition:none}
 .chip:hover{border-color:var(--accent)}
+
+.acciones{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+#printrep{display:none}
+@media print{
+  @page{size:A4 landscape;margin:12mm 10mm 14mm;@bottom-center{content:"Página " counter(page) " de " counter(pages);font:9px Arial,sans-serif;color:#666}@bottom-left{content:"WheelCo · Control de combustible";font:9px Arial,sans-serif;color:#666}}
+  html,body{background:#fff!important;color:#000!important;padding:0!important;min-height:0!important}
+  body>*:not(#printrep){display:none!important}
+  #printrep{display:block;font:10.5px/1.35 Arial,Helvetica,sans-serif;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #printrep .ph{display:flex;gap:18px;align-items:center;border-bottom:4px solid #d31f16;padding-bottom:8px;margin-bottom:10px}
+  #printrep .ph img{height:46px;width:auto}
+  #printrep h1{font-size:19px;margin:0 0 2px;font-family:Arial,sans-serif}
+  #printrep h2{font-size:12.5px;color:#d31f16;margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em;break-after:avoid}
+  #printrep h2.pb{break-before:page}
+  #printrep p{margin:1px 0}.g{color:#666}
+  #printrep .pk{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  #printrep .pk div{border:1px solid #ccc;border-radius:6px;padding:6px 8px;background:#f5f5f5}
+  #printrep .pk div.al{background:#fbe0dd;border-color:#e3a39c}
+  #printrep .pk span{display:block;font-size:8.5px;text-transform:uppercase;color:#555;letter-spacing:.04em}
+  #printrep .pk b{font-size:17px}
+  #printrep table{width:100%;border-collapse:collapse;margin-bottom:6px}
+  #printrep thead{display:table-header-group}
+  #printrep th{background:#1f1f1f;color:#fff;font-size:9px;text-align:left;padding:4px 6px;border:1px solid #1f1f1f}
+  #printrep td{padding:3px 6px;border:1px solid #ccc}
+  #printrep tr{break-inside:avoid}
+  #printrep tr:nth-child(even) td{background:#f7f7f7}
+  #printrep .nm{text-align:right;font-variant-numeric:tabular-nums}
+  #printrep .etq{display:inline-block;padding:1px 7px;border-radius:9px;font-weight:700;font-size:9px;background:#e6e6e6}
+  #printrep .etq.c{background:#fbe0dd;color:#9c1c14}#printrep .etq.o{background:#ddf3e6;color:#11663a}#printrep .etq.w{background:#fcebc9;color:#7a4a00}
+  #printrep .nt{margin-top:10px;font-size:8.5px;color:#666;font-style:italic}
+}

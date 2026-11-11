@@ -251,7 +251,7 @@
       '<label class="f wide2"><span>Máquina (agregá una o varias)</span><input class="in" id="f_cod" list="dl_rep" autocomplete="off" placeholder="Escribí el código y elegí"></label><datalist id="dl_rep">' + d.equipos.map(function (e) { return '<option value="' + esc(e.codigo) + '">' + esc(e.nombre) + '</option>'; }).join('') + '</datalist></div>' +
       (f.codigos.length ? '<div class="chips">' + f.codigos.map(function (c) { return '<button class="chip on" data-a="quitar" data-v="' + esc(c) + '">' + esc(c) + ' ✕</button>'; }).join('') + '</div>' : '') +
       '<div class="small muted">' + (activos.length ? 'Mostrando: ' + esc(activos.join(' · ')) : 'Sin filtros: se muestra todo el período.') + ' · ' + fdate(S.repD) + ' al ' + fdate(S.repH) + '</div>' +
-      '<button class="btn primary" data-a="xlsx" style="min-height:52px">Descargar Excel con este filtro</button></div>' +
+      '<div class="acciones"><button class="btn primary" data-a="xlsx" style="min-height:52px">Descargar Excel con este filtro</button><button class="btn" data-a="print" style="min-height:52px">Imprimir / guardar PDF</button><button class="btn" data-a="imagen" style="min-height:52px">Compartir como imagen</button></div></div>' +
       '<div class="cbkpi"><div class="card"><span class="eyebrow">Litros cargados</span><b class="mono">' + fnum(s.litros, 0) + '</b></div><div class="card"><span class="eyebrow">Cargas</span><b class="mono">' + s.cargas + '</b></div><div class="card"><span class="eyebrow">Máquinas</span><b class="mono">' + s.maquinas + '</b></div>' +
       '<div class="card"><span class="eyebrow">Con sobreconsumo</span><b class="mono" style="color:' + rojo(s.sobreconsumo) + '">' + s.sobreconsumo + '</b></div><div class="card"><span class="eyebrow">Días que no cierran</span><b class="mono" style="color:' + rojo(s.diasNoCierran) + '">' + s.diasNoCierran + '</b></div>' +
       '<div class="card"><span class="eyebrow">Cargas sin cierre de taxilitro</span><b class="mono" style="color:' + rojo(s.sinCierre) + '">' + s.sinCierre + '</b></div><div class="card"><span class="eyebrow">Cargas a revisar</span><b class="mono" style="color:' + rojo(s.aRevisar) + '">' + s.aRevisar + '</b></div></div>' +
@@ -262,23 +262,168 @@
       '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Consumo por máquina (' + r.maq.length + ') <span class="muted" style="text-transform:none;letter-spacing:0">· tocá un título para ordenar</span></div><div class="scroll">' + tablaOrd('maq', colsMaq(), r.maq, 'desvio', 'desc', 'No hay cargas con estos filtros.') + '</div></div>' +
       '<div class="card"><div class="eyebrow" style="margin-bottom:8px">Detalle de cargas (' + r.rows.length + ')</div><div class="scroll">' + tablaOrd('det', colsDet(), r.rows, 'fecha', 'desc', 'No hay cargas con estos filtros.') + '</div></div></div>';
   }
-  function filtroTxt() { var f = S.f, a = []; if (f.codigos.length) a.push('Máquinas ' + f.codigos.join(', ')); if (f.tipo) a.push('Tipo ' + f.tipo); if (f.operador) a.push('Operador ' + f.operador); if (f.camion) a.push('Camión ' + f.camion); if (f.estado) a.push('Estado ' + f.estado); if (f.desvioMin !== '') a.push('Desvío desde +' + f.desvioMin + '%'); return a.length ? a.join(' | ') : 'Sin filtros'; }
+  function filtroTxt() { var f = S.f, a = []; if (f.codigos.length) a.push('Máquinas ' + f.codigos.join(', ')); if (f.tipo) a.push('Tipo ' + f.tipo); if (f.operador) a.push('Operador ' + f.operador); if (f.camion) a.push('Camión ' + f.camion); if (f.estado) a.push('Estado ' + ESTADOS.filter(function (e) { return e[0] === f.estado; })[0][1]); if (f.desvioMin !== '') a.push('Desvío desde +' + f.desvioMin + '%'); return a.length ? a.join(' | ') : 'Sin filtros'; }
+  function ahora() { var d = new Date(); return p2(d.getDate()) + '/' + p2(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); }
+  function tolTxt() { var t = S.data.params.tolSobreconsumo; return fnum((t == null ? 0.15 : t) * 100, 0) + '%'; }
+  var NOTA = 'Cómo se calcula: el consumo real de una máquina es los litros de la carga dividido las horas (o km) trabajadas desde su carga anterior, asumiendo que cada carga llena el tanque; la primera carga de una máquina no se evalúa. Es SOBRECONSUMO si supera al consumo teórico en más de la tolerancia. El día "cierra" si la diferencia entre el taxilitro y los informes de salida es menor o igual a la tolerancia.';
+
+  /* ---------- Excel con formato de presentación (ExcelJS) ---------- */
   function descargar() {
-    if (!window.XLSX) { S.msg = 'No se pudo cargar la librería de Excel (¿sin internet?).'; return render(); }
-    var r = CC.reporte(S.data, S.repD, S.repH, filtros()), X = XLSX, wb = X.utils.book_new(), s = r.resumen;
-    function add(name, aoa, w) { var ws = X.utils.aoa_to_sheet(aoa); ws['!cols'] = w.map(function (x) { return { wch: x }; }); X.utils.book_append_sheet(wb, ws, name); }
-    add('Resumen', [['REPORTE DE CONTROL DE COMBUSTIBLE'], ['Período', fdate(S.repD) + ' al ' + fdate(S.repH)], ['Generado por', S.user], ['Filtros', filtroTxt()], [],
-      ['Litros cargados a máquinas', s.litros], ['Cantidad de cargas', s.cargas], ['Máquinas con SOBRECONSUMO', s.sobreconsumo], ['Días en que el taxilitro NO cierra', s.diasNoCierran], ['Cargas sin cierre de taxilitro', s.sinCierre], ['Cargas a revisar (informe repetido, horómetro/litros dudosos)', s.aRevisar], [],
-      ['Las 10 máquinas con mayor sobreconsumo'], ['Código', 'Equipo', 'Operador', 'Consumo real', 'Consumo teórico', 'Desvío %']]
-      .concat(r.maq.filter(function (m) { return m.estado === 'SOBRECONSUMO'; }).sort(function (a, b) { return b.desvio - a.desvio; }).slice(0, 10).map(function (m) { return [m.codigo, m.nombre, m.operador, rd(m.real, 2), m.teorico, rd(m.desvio * 100, 1) + '%']; })), [34, 40, 30, 14, 14, 10]);
-    add('Consumo por máquina', [['Código', 'Equipo', 'Operador', 'Cargas', 'Litros cargados', 'Litros con medición', 'Uso medido (h o km)', 'Consumo real', 'Consumo teórico', 'Desvío %', 'Estado', 'Último horómetro', 'Última carga']]
-      .concat(r.maq.map(function (m) { return [m.codigo, m.nombre, m.operador, m.cargas, rd(m.litros, 1), rd(m.litrosMed, 1), rd(m.uso, 1), rd(m.real, 2), m.teorico, m.desvio === null ? '' : rd(m.desvio * 100, 1) + '%', m.estado, m.ultimoHorometro, fdate(m.ultimaCarga)]; })), [14, 40, 30, 8, 14, 14, 14, 12, 12, 10, 20, 14, 12]);
-    add('Camión lubricador', [['Fecha', 'Camión', 'Taxilitro inicial', 'Taxilitro final', 'Despachado (L)', 'Informes (L)', 'Diferencia (L)', 'Cierre', 'Entradas del día (L)', 'Stock teórico (L)', 'Stock medido (L)', 'Dif. stock (L)', 'Observación']]
-      .concat(r.cierres.map(function (c) { return [fdate(c.fecha), c.camion, c.inicial, c.taxilitro, rd(c.despachado, 1), rd(c.informes, 1), rd(c.diferencia, 1), c.cierra ? 'CIERRA' : 'NO CIERRA', rd(c.entradasDia, 1), rd(c.stockTeorico, 1), c.stock, c.difStock === null ? '' : rd(c.difStock, 1), c.obs]; })), [12, 10, 14, 14, 14, 14, 14, 12, 16, 16, 16, 14, 30]);
-    add('Salidas (detalle)', [['Fecha', 'N° informe', 'Camión', 'Código', 'Equipo', 'Operador', 'Horómetro', 'Litros', 'Horóm. anterior', 'Uso', 'Consumo real', 'Consumo teórico', 'Desvío %', 'Estado', 'Control', 'Cargado por']]
-      .concat(r.rows.map(function (x) { return [fdate(x.fecha), x.informe, x.camion, x.codigo, x.nombre, x.operador, x.horometro, x.litros, x.prev, rd(x.uso, 1), rd(x.real, 2), x.teorico, x.desvio === null ? '' : rd(x.desvio * 100, 1) + '%', x.estadoCalc, x.control, x.creadoPor]; })), [12, 12, 10, 14, 34, 28, 12, 10, 14, 10, 12, 12, 10, 20, 26, 18]);
-    X.writeFile(wb, 'Control_Combustible_' + S.repD + '_a_' + S.repH + '.xlsx');
+    if (!window.ExcelJS) { S.msg = 'No se pudo cargar la librería de Excel (¿sin internet?).'; return render(); }
+    var r = CC.reporte(S.data, S.repD, S.repH, filtros()), s = r.resumen, EJ = window.ExcelJS, wb = new EJ.Workbook();
+    wb.creator = 'WheelCo'; wb.created = new Date();
+    var NEG = 'FF1F1F1F', ROJO = 'FFD31F16', GRIS = 'FFF3F3F3', BORDE = 'FFBFBFBF';
+    var thin = { style: 'thin', color: { argb: BORDE } };
+    var FILL = { crit: 'FFFBE0DD', ok: 'FFDDF3E6', warn: 'FFFCEBC9' }, TXT = { crit: 'FF9C1C14', ok: 'FF11663A', warn: 'FF7A4A00' };
+    function estCls(t) { return t === 'SOBRECONSUMO' || t === 'NO CIERRA' || t === 'REVISAR' || t === 'Código inválido' ? 'crit' : (t === 'Normal' || t === 'CIERRA' || t === 'OK') ? 'ok' : (t === 'Sin teórico' || t === 'Sin datos suficientes' || (t && t !== 'Sin cargas' && t !== '1ª carga (sin ref.)' && t !== 'Sin medición')) ? 'warn' : ''; }
+    function hoja(nombre, titulo, ncols, orient) {
+      var ws = wb.addWorksheet(nombre, { views: [{ showGridLines: false }] });
+      ws.pageSetup = { paperSize: 9, orientation: orient || 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.4, right: 0.4, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } };
+      ws.headerFooter.oddFooter = '&L&8WheelCo · Control de combustible&C&8Página &P de &N&R&8Impreso: &D';
+      var last = ncols;
+      ws.mergeCells(1, 3, 1, last); ws.mergeCells(2, 3, 2, last); ws.mergeCells(3, 3, 3, last);
+      var c1 = ws.getCell(1, 3); c1.value = titulo; c1.font = { name: 'Arial', size: 16, bold: true, color: { argb: NEG } }; c1.alignment = { vertical: 'middle' };
+      var c2 = ws.getCell(2, 3); c2.value = 'Período: ' + fdate(S.repD) + ' al ' + fdate(S.repH) + '   ·   ' + filtroTxt(); c2.font = { name: 'Arial', size: 10, color: { argb: 'FF454545' } }; c2.alignment = { vertical: 'middle', wrapText: true };
+      var c3 = ws.getCell(3, 3); c3.value = 'Generado por ' + S.user + ' el ' + ahora(); c3.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } }; c3.alignment = { vertical: 'middle' };
+      ws.getRow(1).height = 30; ws.getRow(2).height = 22; ws.getRow(3).height = 18; ws.getRow(4).height = 4;
+      for (var j = 1; j <= last; j++) ws.getCell(4, j).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROJO } };
+      if (logoId !== null) ws.addImage(logoId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 118, height: 47 } });
+      return ws;
+    }
+    /* tabla: cols = [{h:'Título', w:ancho, k:fn(fila), f:'formato', c:'center'|'right', e:true si pinta estado}] */
+    function tabla(ws, fila0, cols, rows, opt) {
+      opt = opt || {};
+      cols.forEach(function (c, i) { var col = ws.getColumn(i + 1); if (!col.width || col.width < c.w) col.width = c.w; });
+      var hr = ws.getRow(fila0); hr.height = 30;
+      cols.forEach(function (c, i) { var x = hr.getCell(i + 1); x.value = c.h; x.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFFFF' } }; x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NEG } }; x.alignment = { vertical: 'middle', horizontal: c.f || c.c ? 'center' : 'left', wrapText: true }; x.border = { top: thin, bottom: thin, left: thin, right: thin }; });
+      rows.forEach(function (row, ri) {
+        var rr = ws.getRow(fila0 + 1 + ri); rr.height = 18;
+        cols.forEach(function (c, i) {
+          var x = rr.getCell(i + 1), v = c.k(row); x.value = (v === undefined || v === null || v === '' || (typeof v === 'number' && isNaN(v))) ? null : v;
+          x.font = { name: 'Arial', size: 9, bold: !!c.b }; x.border = { top: thin, bottom: thin, left: thin, right: thin };
+          x.alignment = { vertical: 'middle', horizontal: c.c || (c.f ? 'right' : 'left'), wrapText: false };
+          if (c.f) x.numFmt = c.f;
+          if (ri % 2 === 1) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GRIS } };
+          if (c.e && x.value !== null) { var cl = estCls(String(x.value)); if (cl) { x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL[cl] } }; x.font = { name: 'Arial', size: 9, bold: true, color: { argb: TXT[cl] } }; x.alignment = { vertical: 'middle', horizontal: 'center' }; } }
+          if (c.neg && typeof x.value === 'number' && x.value > 0 && c.neg === 'pos') x.font = { name: 'Arial', size: 9, bold: true, color: { argb: TXT.crit } };
+        });
+      });
+      if (!rows.length) { var e = ws.getRow(fila0 + 1).getCell(1); e.value = 'Sin datos para este período y filtros.'; e.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } }; }
+      return fila0 + 1 + Math.max(rows.length, 1);
+    }
+    function seccion(ws, fila, texto, ncols) { ws.mergeCells(fila, 1, fila, ncols); var x = ws.getCell(fila, 1); x.value = texto; x.font = { name: 'Arial', size: 11, bold: true, color: { argb: ROJO } }; x.alignment = { vertical: 'middle' }; ws.getRow(fila).height = 22; return fila + 1; }
+    function nota(ws, fila, ncols, texto) { ws.mergeCells(fila, 1, fila, ncols); var x = ws.getCell(fila, 1); x.value = texto; x.font = { name: 'Arial', size: 8, italic: true, color: { argb: 'FF666666' } }; x.alignment = { wrapText: true, vertical: 'top' }; ws.getRow(fila).height = 48; }
+    var logoId = null;
+
+    function armar() {
+      /* 1) Resumen */
+      var w1 = hoja('Resumen', 'Reporte de control de combustible', 8, 'portrait'), f = 6;
+      f = seccion(w1, f, 'Indicadores del período', 8);
+      var kp = [['Litros cargados a máquinas', s.litros, '#,##0'], ['Cantidad de cargas', s.cargas, '#,##0'], ['Máquinas incluidas', s.maquinas, '0'], ['Máquinas con SOBRECONSUMO (tolerancia ' + tolTxt() + ')', s.sobreconsumo, '0', 1], ['Días en que el taxilitro NO cierra con los informes', s.diasNoCierran, '0', 1], ['Cargas cuyo día no tiene cierre de taxilitro', s.sinCierre, '0', 1], ['Cargas a revisar (informe repetido, horómetro o litros dudosos)', s.aRevisar, '0', 1]];
+      kp.forEach(function (k, i) { var r1 = w1.getRow(f + i); w1.mergeCells(f + i, 1, f + i, 6); var a1 = r1.getCell(1), b1 = r1.getCell(7); a1.value = k[0]; a1.font = { name: 'Arial', size: 10 }; b1.value = k[1]; b1.numFmt = k[2]; b1.font = { name: 'Arial', size: 11, bold: true, color: { argb: k[3] && k[1] > 0 ? TXT.crit : NEG } }; b1.alignment = { horizontal: 'right' }; if (k[3] && k[1] > 0) b1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: FILL.crit } }; for (var j = 1; j <= 7; j++) r1.getCell(j).border = { bottom: thin }; r1.height = 20; });
+      f += kp.length + 1;
+      f = seccion(w1, f, 'Camión lubricador: estado actual', 8);
+      var cam = CC.camiones(S.data).filter(function (c) { return !S.f.camion || c.camion === S.f.camion; });
+      f = tabla(w1, f, [{ h: 'Camión', w: 12, k: function (c) { return c.camion; }, b: 1 }, { h: 'Último cierre', w: 14, k: function (c) { return c.ultimo ? fdate(c.ultimo.fecha) : 'Sin cierres'; }, c: 'center' }, { h: 'Taxilitro', w: 14, k: function (c) { return c.ultimo ? c.ultimo.taxilitro : null; }, f: '#,##0.0' }, { h: 'Stock teórico (L)', w: 16, k: function (c) { return c.ultimo ? c.ultimo.stockTeorico : null; }, f: '#,##0.0' }, { h: 'Stock medido (L)', w: 16, k: function (c) { return c.ultimo ? c.ultimo.stock : null; }, f: '#,##0.0' }, { h: 'Control de stock', w: 16, e: 1, k: function (c) { var u = c.ultimo; return !u ? '' : u.difStock === null ? 'Sin medición' : u.stockOk ? 'OK' : 'REVISAR'; } }], cam) + 1;
+      f = seccion(w1, f, 'Máquinas con sobreconsumo', 8);
+      var sob = r.maq.filter(function (m) { return m.estado === 'SOBRECONSUMO'; }).sort(function (a, b) { return b.desvio - a.desvio; });
+      f = tabla(w1, f, [{ h: 'Código', w: 12, k: function (m) { return m.codigo; }, b: 1 }, { h: 'Equipo', w: 30, k: function (m) { return m.nombre; } }, { h: 'Operador', w: 28, k: function (m) { return m.operador; } }, { h: 'Consumo real', w: 14, f: '#,##0.00', k: function (m) { return rd(m.real, 2); } }, { h: 'Teórico', w: 12, f: '#,##0.00', k: function (m) { return m.teorico; } }, { h: 'Desvío', w: 12, f: '+0.0%;-0.0%;0.0%', neg: 'pos', k: function (m) { return m.desvio; } }], sob) + 1;
+      nota(w1, f, 8, NOTA);
+      w1.getColumn(7).width = 14; w1.getColumn(8).width = 4;
+
+      /* 2) Consumo por máquina */
+      var w2 = hoja('Consumo por máquina', 'Consumo por máquina', 13), maq = r.maq.slice().sort(function (a, b) { return (b.desvio === null ? -9 : b.desvio) - (a.desvio === null ? -9 : a.desvio); });
+      var fin2 = tabla(w2, 6, [{ h: 'Código', w: 13, b: 1, k: function (m) { return m.codigo; } }, { h: 'Equipo', w: 34, k: function (m) { return m.nombre; } }, { h: 'Operador', w: 28, k: function (m) { return m.operador; } }, { h: 'Cargas', w: 9, f: '0', k: function (m) { return m.cargas; } }, { h: 'Litros cargados', w: 13, f: '#,##0.0', k: function (m) { return rd(m.litros, 1); } }, { h: 'Litros con medición', w: 13, f: '#,##0.0', k: function (m) { return rd(m.litrosMed, 1); } }, { h: 'Uso medido (h o km)', w: 13, f: '#,##0.0', k: function (m) { return rd(m.uso, 1); } }, { h: 'Consumo real', w: 12, f: '#,##0.00', k: function (m) { return rd(m.real, 2); } }, { h: 'Consumo teórico', w: 12, f: '#,##0.00', k: function (m) { return m.teorico; } }, { h: 'Desvío', w: 10, f: '+0.0%;-0.0%;0.0%', neg: 'pos', k: function (m) { return m.desvio; } }, { h: 'Estado', w: 20, e: 1, k: function (m) { return m.estado; } }, { h: 'Último horómetro', w: 13, f: '#,##0.0', k: function (m) { return m.ultimoHorometro; } }, { h: 'Última carga', w: 12, c: 'center', k: function (m) { return fdate(m.ultimaCarga); } }], maq);
+      var tr = w2.getRow(fin2); w2.mergeCells(fin2, 1, fin2, 3); tr.getCell(1).value = 'TOTAL'; tr.getCell(4).value = s.cargas; tr.getCell(5).value = rd(s.litros, 1);
+      for (var j = 1; j <= 13; j++) { var tx = tr.getCell(j); tx.font = { name: 'Arial', size: 9, bold: true }; tx.border = { top: { style: 'medium', color: { argb: NEG } } }; if (j >= 4 && j <= 7) tx.numFmt = j === 4 ? '0' : '#,##0.0'; }
+      w2.views = [{ showGridLines: false, state: 'frozen', ySplit: 6 }]; w2.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: 13 } }; w2.pageSetup.printTitlesRow = '6:6';
+
+      /* 3) Cierre del camión */
+      var w3 = hoja('Cierre del camión', 'Camión lubricador: cierre diario (taxilitro vs informes)', 13);
+      tabla(w3, 6, [{ h: 'Fecha', w: 12, c: 'center', k: function (c) { return fdate(c.fecha); } }, { h: 'Camión', w: 11, b: 1, k: function (c) { return c.camion; } }, { h: 'Taxilitro inicial', w: 14, f: '#,##0.0', k: function (c) { return c.inicial; } }, { h: 'Taxilitro final', w: 14, f: '#,##0.0', k: function (c) { return c.taxilitro; } }, { h: 'Despachado según taxilitro (L)', w: 16, f: '#,##0.0', k: function (c) { return rd(c.despachado, 1); } }, { h: 'Salidas según informes (L)', w: 16, f: '#,##0.0', k: function (c) { return rd(c.informes, 1); } }, { h: 'Diferencia (L)', w: 13, f: '#,##0.0;-#,##0.0;0.0', k: function (c) { return rd(c.diferencia, 1); } }, { h: 'Cierre del día', w: 14, e: 1, k: function (c) { return c.cierra ? 'CIERRA' : 'NO CIERRA'; } }, { h: 'Entradas del día (L)', w: 13, f: '#,##0.0', k: function (c) { return rd(c.entradasDia, 1); } }, { h: 'Stock teórico (L)', w: 14, f: '#,##0.0', k: function (c) { return rd(c.stockTeorico, 1); } }, { h: 'Stock medido (L)', w: 14, f: '#,##0.0', k: function (c) { return c.stock; } }, { h: 'Dif. stock (L)', w: 13, f: '#,##0.0;-#,##0.0;0.0', k: function (c) { return c.difStock === null ? null : rd(c.difStock, 1); } }, { h: 'Observación', w: 30, k: function (c) { return c.obs; } }], r.cierres);
+      w3.views = [{ showGridLines: false, state: 'frozen', ySplit: 6 }]; w3.pageSetup.printTitlesRow = '6:6';
+
+      /* 4) Detalle */
+      var w4 = hoja('Detalle de cargas', 'Detalle de cargas (informes de salida)', 16), det = r.rows.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : (Number(a.informe) || 0) - (Number(b.informe) || 0); });
+      tabla(w4, 6, [{ h: 'Fecha', w: 12, c: 'center', k: function (x) { return fdate(x.fecha); } }, { h: 'N° informe', w: 11, c: 'center', k: function (x) { return x.informe; } }, { h: 'Camión', w: 10, k: function (x) { return x.camion; } }, { h: 'Código', w: 12, b: 1, k: function (x) { return x.codigo; } }, { h: 'Equipo', w: 30, k: function (x) { return x.nombre; } }, { h: 'Operador', w: 26, k: function (x) { return x.operador; } }, { h: 'Horómetro / km', w: 12, f: '#,##0.0', k: function (x) { return x.horometro; } }, { h: 'Litros', w: 10, f: '#,##0.0', k: function (x) { return x.litros; } }, { h: 'Horóm. anterior', w: 12, f: '#,##0.0', k: function (x) { return x.prev; } }, { h: 'Uso', w: 9, f: '#,##0.0', k: function (x) { return rd(x.uso, 1); } }, { h: 'Consumo real', w: 11, f: '#,##0.00', k: function (x) { return rd(x.real, 2); } }, { h: 'Consumo teórico', w: 11, f: '#,##0.00', k: function (x) { return x.teorico; } }, { h: 'Desvío', w: 9, f: '+0.0%;-0.0%;0.0%', neg: 'pos', k: function (x) { return x.desvio; } }, { h: 'Estado', w: 19, e: 1, k: function (x) { return x.estadoCalc; } }, { h: 'Control', w: 24, e: 1, k: function (x) { return x.control; } }, { h: 'Cargado por', w: 22, k: function (x) { return x.creadoPor; } }], det);
+      w4.views = [{ showGridLines: false, state: 'frozen', ySplit: 6 }]; w4.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: 16 } }; w4.pageSetup.printTitlesRow = '6:6';
+
+      return wb.xlsx.writeBuffer().then(function (buf) {
+        var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'Control_Combustible_' + S.repD + '_a_' + S.repH + '.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+        toast('Excel descargado');
+      });
+    }
+    toast('Preparando Excel…');
+    fetch('icons/logo.png').then(function (x) { return x.ok ? x.arrayBuffer() : null; }).catch(function () { return null; }).then(function (ab) {
+      if (ab) { var bin = '', u8 = new Uint8Array(ab); for (var i = 0; i < u8.length; i += 8192) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); try { logoId = wb.addImage({ base64: btoa(bin), extension: 'png' }); } catch (e) { logoId = null; } }
+      return armar();
+    }).catch(function (e) { S.msg = 'No se pudo armar el Excel: ' + (e && e.message ? e.message : e); render(); });
   }
+
+  /* ---------- Imprimir / guardar como PDF ---------- */
+  function imprimir() {
+    var r = CC.reporte(S.data, S.repD, S.repH, filtros()), s = r.resumen, d = S.data;
+    function th(a) { return '<tr>' + a.map(function (x) { return '<th' + (x[1] ? ' class="nm"' : '') + '>' + x[0] + '</th>'; }).join('') + '</tr>'; }
+    function tag(t) { var c = t === 'SOBRECONSUMO' || t === 'NO CIERRA' || t === 'REVISAR' || t === 'Código inválido' ? 'c' : (t === 'Normal' || t === 'CIERRA' || t === 'OK') ? 'o' : (t === 'Sin teórico' || t === 'Sin datos suficientes' || /revisar|repetido|Falta|Faltan/i.test(t)) ? 'w' : ''; return '<span class="etq ' + c + '">' + esc(t) + '</span>'; }
+    var cam = CC.camiones(d).filter(function (c) { return !S.f.camion || c.camion === S.f.camion; });
+    var maq = r.maq.slice().sort(function (a, b) { return (b.desvio === null ? -9 : b.desvio) - (a.desvio === null ? -9 : a.desvio); });
+    var det = r.rows.slice().sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : (Number(a.informe) || 0) - (Number(b.informe) || 0); });
+    var h = '<div class="ph"><picture><source media="(prefers-color-scheme: dark)" srcset="icons/logo.png"><img src="icons/logo.png" alt="WheelCo"></picture><div><h1>Reporte de control de combustible</h1><p>Período: <b>' + fdate(S.repD) + ' al ' + fdate(S.repH) + '</b> · ' + esc(filtroTxt()) + '</p><p class="g">Generado por ' + esc(S.user) + ' el ' + ahora() + '</p></div></div>' +
+      '<h2>Indicadores</h2><div class="pk">' + [['Litros cargados', fnum(s.litros, 0), 0], ['Cargas', s.cargas, 0], ['Máquinas', s.maquinas, 0], ['Con sobreconsumo', s.sobreconsumo, s.sobreconsumo], ['Días que no cierran', s.diasNoCierran, s.diasNoCierran], ['Cargas sin cierre de taxilitro', s.sinCierre, s.sinCierre], ['Cargas a revisar', s.aRevisar, s.aRevisar]].map(function (k) { return '<div class="' + (k[2] ? 'al' : '') + '"><span>' + k[0] + '</span><b>' + k[1] + '</b></div>'; }).join('') + '</div>' +
+      '<h2>Camión lubricador: estado actual</h2><table>' + th([['Camión'], ['Último cierre'], ['Taxilitro', 1], ['Stock teórico (L)', 1], ['Stock medido (L)', 1], ['Control']]) + cam.map(function (c) { var u = c.ultimo; return '<tr><td><b>' + esc(c.camion) + '</b></td>' + (u ? '<td>' + fdate(u.fecha) + '</td><td class="nm">' + fnum(u.taxilitro, 1) + '</td><td class="nm">' + fnum(u.stockTeorico, 1) + '</td><td class="nm">' + fnum(u.stock, 1) + '</td><td>' + tag(u.difStock === null ? 'Sin medición' : u.stockOk ? 'OK' : 'REVISAR') + '</td>' : '<td colspan="5">Sin cierres cargados</td>') + '</tr>'; }).join('') + '</table>' +
+      '<h2>Cierre diario: taxilitro vs informes</h2>' + (r.cierres.length ? '<table>' + th([['Fecha'], ['Camión'], ['Despachado (L)', 1], ['Informes (L)', 1], ['Diferencia (L)', 1], ['Entradas (L)', 1], ['Cierre']]) + r.cierres.map(function (c) { return '<tr><td>' + fdate(c.fecha) + '</td><td>' + esc(c.camion) + '</td><td class="nm">' + fnum(c.despachado, 1) + '</td><td class="nm">' + fnum(c.informes, 1) + '</td><td class="nm">' + (c.diferencia > 0 ? '+' : '') + fnum(c.diferencia, 1) + '</td><td class="nm">' + fnum(c.entradasDia, 1) + '</td><td>' + tag(c.cierra ? 'CIERRA' : 'NO CIERRA') + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cierres en el período.</p>') +
+      '<h2>Consumo por máquina (' + maq.length + ')</h2>' + (maq.length ? '<table>' + th([['Máquina'], ['Operador'], ['Cargas', 1], ['Litros', 1], ['Uso (h/km)', 1], ['Real', 1], ['Teórico', 1], ['Desvío', 1], ['Estado']]) + maq.map(function (m) { return '<tr><td><b>' + esc(m.codigo) + '</b> ' + esc(m.nombre) + '</td><td>' + esc(m.operador) + '</td><td class="nm">' + m.cargas + '</td><td class="nm">' + fnum(m.litros, 1) + '</td><td class="nm">' + fnum(m.uso, 1) + '</td><td class="nm">' + fnum(m.real, 2) + '</td><td class="nm">' + fnum(m.teorico, 2) + '</td><td class="nm">' + (m.desvio === null ? '—' : (m.desvio >= 0 ? '+' : '') + fnum(m.desvio * 100, 0) + '%') + '</td><td>' + tag(m.estado) + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cargas con estos filtros.</p>') +
+      '<h2 class="pb">Detalle de cargas (' + det.length + ')</h2>' + (det.length ? '<table>' + th([['Fecha'], ['N°'], ['Máquina'], ['Operador'], ['Horóm.', 1], ['Litros', 1], ['Real', 1], ['Desvío', 1], ['Estado'], ['Control']]) + det.map(function (x) { return '<tr><td>' + fdate(x.fecha) + '</td><td>' + esc(x.informe) + '</td><td><b>' + esc(x.codigo) + '</b></td><td>' + esc(x.operador) + '</td><td class="nm">' + fnum(x.horometro, 1) + '</td><td class="nm">' + fnum(x.litros, 1) + '</td><td class="nm">' + fnum(x.real, 2) + '</td><td class="nm">' + (x.desvio === null ? '—' : (x.desvio >= 0 ? '+' : '') + fnum(x.desvio * 100, 0) + '%') + '</td><td>' + tag(x.estadoCalc) + '</td><td>' + tag(x.control) + '</td></tr>'; }).join('') + '</table>' : '<p class="g">No hay cargas con estos filtros.</p>') +
+      '<p class="nt">' + esc(NOTA) + ' Tolerancia de sobreconsumo vigente: ' + tolTxt() + '.</p>';
+    var el = $('#printrep'); if (!el) { el = document.createElement('div'); el.id = 'printrep'; document.body.appendChild(el); }
+    el.innerHTML = h; setTimeout(function () { window.print(); }, 150);
+  }
+
+
+  /* ---------- Compartir como imagen (resumen para WhatsApp, etc.) ---------- */
+  function compartirImagen() {
+    var r = CC.reporte(S.data, S.repD, S.repH, filtros()), s = r.resumen, W = 1080, P = 48;
+    var sob = r.maq.filter(function (m) { return m.estado === 'SOBRECONSUMO'; }).sort(function (a, b) { return b.desvio - a.desvio; }).slice(0, 10);
+    var noc = r.cierres.filter(function (c) { return !c.cierra; }).slice(-5).reverse();
+    var cam = CC.camiones(S.data).filter(function (c) { return !S.f.camion || c.camion === S.f.camion; });
+    var H = 150 + 40 + 230 + 60 + cam.length * 44 + 70 + (sob.length ? sob.length * 46 + 60 : 70) + (noc.length ? noc.length * 40 + 70 : 0) + 110;
+    var c = document.createElement('canvas'); c.width = W; c.height = H; var x = c.getContext('2d'), F = 'system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif';
+    function txt(t, px, py, size, w, col, al, maxw) { x.font = (w || 400) + ' ' + size + 'px ' + F; x.fillStyle = col || '#0e0e0e'; x.textAlign = al || 'left'; var v = String(t); if (maxw) { while (x.measureText(v).width > maxw && v.length > 3) v = v.slice(0, -2); if (v !== String(t)) v += '…'; } x.fillText(v, px, py); }
+    function rect(rx, ry, rw, rh, fill, rad, stroke) { x.beginPath(); if (x.roundRect) x.roundRect(rx, ry, rw, rh, rad || 0); else x.rect(rx, ry, rw, rh); if (fill) { x.fillStyle = fill; x.fill(); } if (stroke) { x.strokeStyle = stroke; x.lineWidth = 2; x.stroke(); } }
+    function dibujar(logo) {
+      rect(0, 0, W, H, '#ffffff'); rect(0, 0, W, 8, '#d31f16');
+      var y = 40; if (logo && logo.width) { var lw = 190, lh = logo.height * lw / logo.width; x.drawImage(logo, P, y, lw, lh); }
+      txt('Control de combustible', W - P, y + 34, 30, 800, '#0e0e0e', 'right'); txt(fdate(S.repD) + ' al ' + fdate(S.repH), W - P, y + 68, 24, 500, '#454545', 'right');
+      y = 150; var ft = filtroTxt(); if (ft !== 'Sin filtros') { txt('Filtros: ' + ft, P, y, 20, 500, '#666', 'left', W - 2 * P); }
+      y += 24;
+      var kp = [['Litros cargados', fnum(s.litros, 0), 0], ['Cargas', String(s.cargas), 0], ['Máquinas', String(s.maquinas), 0], ['Con sobreconsumo', String(s.sobreconsumo), s.sobreconsumo], ['Días que no cierran', String(s.diasNoCierran), s.diasNoCierran], ['Cargas sin cierre', String(s.sinCierre), s.sinCierre], ['Cargas a revisar', String(s.aRevisar), s.aRevisar]];
+      var cw = (W - 2 * P - 3 * 16) / 4;
+      kp.forEach(function (k, i) { var cx = P + (i % 4) * (cw + 16), cy = y + Math.floor(i / 4) * 112; rect(cx, cy, cw, 96, k[2] ? '#fbe0dd' : '#f2f2f2', 16); txt(k[0].toUpperCase(), cx + 16, cy + 30, 15, 700, '#666', 'left', cw - 24); txt(k[1], cx + 16, cy + 76, 42, 800, k[2] ? '#9c1c14' : '#0e0e0e', 'left', cw - 24); });
+      y += 230 + 20;
+      txt('CAMIÓN LUBRICADOR', P, y, 18, 800, '#d31f16'); y += 14;
+      cam.forEach(function (cm) { var u = cm.ultimo; rect(P, y, W - 2 * P, 38, '#f7f7f7', 10); txt(cm.camion, P + 14, y + 26, 22, 800); if (u) { var st = u.difStock === null ? 'sin medición de stock' : (u.stockOk ? 'stock OK' : 'REVISAR stock'); txt('Último cierre ' + fdate(u.fecha) + ' · Stock teórico ' + fnum(u.stockTeorico, 0) + ' L · ' + st, W - P - 14, y + 26, 20, 500, u.difStock !== null && !u.stockOk ? '#9c1c14' : '#333', 'right', 780); } else txt('Sin cierres cargados', W - P - 14, y + 26, 20, 500, '#666', 'right'); y += 44; });
+      y += 30; txt('MÁQUINAS CON SOBRECONSUMO', P, y, 18, 800, '#d31f16'); y += 14;
+      if (!sob.length) { txt('Ninguna máquina supera la tolerancia (' + tolTxt() + ') en este período.', P, y + 30, 22, 500, '#11663a'); y += 60; }
+      else { txt('Real / Teórico', W - P - 130, y + 22, 16, 700, '#666', 'right'); txt('Desvío', W - P, y + 22, 16, 700, '#666', 'right'); y += 30;
+        sob.forEach(function (m, i) { rect(P, y, W - 2 * P, 42, i % 2 ? '#ffffff' : '#f7f7f7', 8); txt(m.codigo, P + 14, y + 29, 22, 800); txt(m.nombre + (m.operador ? ' · ' + m.operador : ''), P + 150, y + 29, 19, 400, '#333', 'left', 480); txt(fnum(m.real, 1) + ' / ' + fnum(m.teorico, 1), W - P - 130, y + 29, 20, 600, '#0e0e0e', 'right'); txt('+' + fnum(m.desvio * 100, 0) + '%', W - P - 14, y + 29, 22, 800, '#9c1c14', 'right'); y += 46; }); }
+      if (noc.length) { y += 24; txt('DÍAS QUE NO CIERRAN', P, y, 18, 800, '#d31f16'); y += 12; noc.forEach(function (cc) { rect(P, y, W - 2 * P, 34, '#fbe0dd', 8); txt(fdate(cc.fecha) + ' · ' + cc.camion, P + 14, y + 24, 20, 700, '#9c1c14'); txt('Taxilitro ' + fnum(cc.despachado, 0) + ' L vs informes ' + fnum(cc.informes, 0) + ' L (' + (cc.diferencia > 0 ? '+' : '') + fnum(cc.diferencia, 0) + ' L)', W - P - 14, y + 24, 19, 500, '#333', 'right'); y += 40; }); }
+      txt('Generado por ' + S.user + ' · ' + ahora() + ' · WheelCo', W / 2, y + 50, 17, 500, '#8a8a8a', 'center');
+      return y + 80;
+    }
+    function recorte(yf) { var c2 = document.createElement('canvas'); c2.width = W; c2.height = Math.min(H, Math.max(300, yf)); c2.getContext('2d').drawImage(c, 0, 0); c = c2; }
+    var im = new Image(); im.onload = function () { recorte(dibujar(im)); salida(); }; im.onerror = function () { recorte(dibujar(null)); salida(); }; im.src = 'icons/logo.png';
+    function salida() {
+      c.toBlob(function (blob) {
+        var nombre = 'Resumen_Combustible_' + S.repD + '_a_' + S.repH + '.png', file = null;
+        try { file = new File([blob], nombre, { type: 'image/png' }); } catch (e) {}
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: 'Control de combustible' }).catch(function () {}); return; }
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500); toast('Imagen descargada');
+        window.__ULTIMA_IMG__ = { w: c.width, h: c.height, url: c.toDataURL('image/png') };
+      }, 'image/png');
+    }
+  }
+
   function rd(n, d) { return n === null || n === undefined || isNaN(n) ? '' : Math.round(n * Math.pow(10, d)) / Math.pow(10, d); }
 
   /* ----- Corregir / anular ----- */
@@ -316,6 +461,8 @@
     else if (a === 'fxno') dlg.close();
     else if (a === 'otra') { S.step = 'cedula'; S.msg = ''; S.ced = null; render(); }
     else if (a === 'xlsx') descargar();
+    else if (a === 'print') imprimir();
+    else if (a === 'imagen') compartirImagen();
     else if (a === 'preset') { setPreset(b.dataset.v); vReportes(); }
     else if (a === 'limpiar') { S.f = { codigos: [], tipo: '', operador: '', camion: '', estado: '', desvioMin: '' }; S.sort = {}; setPreset('mes'); vReportes(); }
     else if (a === 'quitar') { S.f.codigos = S.f.codigos.filter(function (c) { return c !== b.dataset.v; }); vReportes(); }
